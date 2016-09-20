@@ -424,6 +424,10 @@ static __attribute__((noreturn)) void loadExe(const char *exefname, uint8 *exe, 
 
     const LxObjectTableEntry *obj = ((const LxObjectTableEntry *) (exe + lx->object_table_offset));
     for (uint32 i = 0; i < lx->module_num_objects; i++, obj++) {
+
+        if (obj->object_flags & 0x8)  // !!! FIXME: resource object; ignore this until resource support is written, later.
+            continue;
+
         uint32 vsize = obj->virtual_size;
         if ((vsize % lx->page_size) != 0)
              vsize += lx->page_size - (vsize % lx->page_size);
