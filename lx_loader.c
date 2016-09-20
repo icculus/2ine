@@ -430,7 +430,7 @@ static __attribute__((noreturn)) void loadExe(const char *exefname, uint8 *exe, 
 
         const int prot = ((obj->object_flags & 0x1) ? PROT_READ : 0) |
                          ((obj->object_flags & 0x2) ? PROT_WRITE : 0) |
-                         ((obj->object_flags & 0x1) ? PROT_EXEC : 0);
+                         ((obj->object_flags & 0x4) ? PROT_EXEC : 0);
 
         const int mmapflags = MAP_ANON | MAP_PRIVATE | MAP_FIXED;
         void *base = (void *) ((size_t) obj->reloc_base_addr);
