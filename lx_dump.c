@@ -441,7 +441,7 @@ static void parseExe(const char *exefname, uint8 *exe, uint32 exelen)
         memcpy(name, import_modules_table, namelen);
         import_modules_table += namelen;
         name[namelen] = '\0';
-        printf("%u: %s\n", (unsigned int) i, name);
+        printf("%u: %s\n", (unsigned int) i+1, name);
     }
 
 #if 0
