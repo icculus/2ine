@@ -167,11 +167,11 @@ static int decompressExePack2(uint8 *dst, const uint32 dstlen, const uint8 *src,
     return 1;
 } // decompressExePack2
 
-void missing_ordinal_called(const uint32 ordinal)
+void missing_ordinal_called(const char *module, const uint32 ordinal)
 {
     fflush(stdout);
     fflush(stderr);
-    fprintf(stderr, "\n\nMissing ordinal '%u' called!\n", ordinal);
+    fprintf(stderr, "\n\nMissing ordinal '%u' in module '%s' called!\n", ordinal, module);
     fprintf(stderr, "Aborting.\n\n\n");
     //STUBBED("output backtrace");
     fflush(stderr);
@@ -186,13 +186,15 @@ static uint32 DosPutMessage(uint32 handle, uint32 msglen, const char *msg)
     return 0;
 } // DosPutMessage
 
-static uint32 getModuleProcAddrByOrdinal(const uint16 moduleid, const uint32 importid)
+static uint32 getModuleProcAddrByOrdinal(const LxHeader *lx, const char * const * const modules, const uint16 moduleid, const uint32 importid)
 {
-    // !!! FIXME: write me for real.
-    if (moduleid != 1) {  // this is MSG in hello.exe, for testing purposes.
-        fprintf(stderr, "uhoh, looking for module ordinal that isn't #1.\n");
+    if (moduleid == 0) {
+        fprintf(stderr, "uhoh, looking for module ordinal 0, which is illegal.\n");
         return 0;
-    } // if
+    } else if (moduleid > lx->num_import_mod_entries) {
+        fprintf(stderr, "uhoh, looking for module ordinal %u, but only %u available.\n", (unsigned int) moduleid, (unsigned int) lx->num_import_mod_entries);
+        return 0;
+    } // else if
 
     //fprintf(stderr, "importid == %u\n", (unsigned int) importid);
 
@@ -211,8 +213,12 @@ static uint32 getModuleProcAddrByOrdinal(const uint16 moduleid, const uint32 imp
         pageused = 0;
     } // if
 
-    if (importid == 5)  // !!! FIXME: this is DosPutMessage in the MSG module.
-        return (uint32) (size_t) DosPutMessage;
+    // !!! FIXME: obviously, this is going to have to be more robust.
+    if (strcmp(modules[moduleid-1], "MSG") == 0)
+    {
+        if (importid == 5)
+            return (uint32) (size_t) DosPutMessage;
+    } // if
 
     void *trampoline = page + pageused;
     char *ptr = (char *) trampoline;
@@ -223,6 +229,9 @@ static uint32 getModuleProcAddrByOrdinal(const uint16 moduleid, const uint32 imp
     *(ptr++) = 0xE5;  //   ...movl %esp,%ebp
     *(ptr++) = 0x68;  // pushl immediate
     memcpy(ptr, &ordinal, sizeof (uint32));
+    ptr += sizeof (uint32);
+    *(ptr++) = 0x68;  // pushl immediate
+    memcpy(ptr, &modules[moduleid-1], sizeof (uint32));
     ptr += sizeof (uint32);
     *(ptr++) = 0xB8;  // movl immediate to %eax
     const void *fn = missing_ordinal_called;
@@ -270,7 +279,7 @@ static void doFixup(uint8 *page, const uint16 offset, const uint32 finalval, con
     } // switch
 } // doFixup
 
-static void fixupPage(const LxHeader *lx, const LxObjectTableEntry *obj, uint8 *page)
+static void fixupPage(const LxHeader *lx, const char * const * const modules, const LxObjectTableEntry *obj, uint8 *page)
 {
     const uint8 *exe = (const uint8 *) lx;   // this is the start of the LX EXE (past the DOS stub, etc).
     const uint32 *fixuppage = (((const uint32 *) (exe + lx->fixup_page_table_offset)) + (obj->page_table_index - 1));
@@ -363,7 +372,7 @@ static void fixupPage(const LxHeader *lx, const LxObjectTableEntry *obj, uint8 *
                     importid = (uint32) *((uint16 *) fixup); fixup += 2;
                 } // else
 
-                finalval = getModuleProcAddrByOrdinal(moduleid, importid);
+                finalval = getModuleProcAddrByOrdinal(lx, modules, moduleid, importid);
                 break;
             } // case
 
@@ -421,6 +430,28 @@ static __attribute__((noreturn)) void loadExe(const char *exefname, uint8 *exe, 
         exit(1);
 
     const LxHeader *lx = (const LxHeader *) exe;
+
+    // !!! FIXME: recursively load all external dependencies from lx->import_module_table_offset, here.
+    char **modules = malloc(sizeof (char *) * lx->num_import_mod_entries);
+    if (!modules) {
+        fprintf(stderr, "Out of memory!\n");
+        exit(1);
+    }
+
+    const uint8 *import_modules_table = exe + lx->import_module_table_offset;
+    for (uint32 i = 0; i < lx->num_import_mod_entries; i++) {
+        const uint8 namelen = *(import_modules_table++);
+        // !!! FIXME: name can't be more than 127 chars, according to docs. Check this.
+        char *str = (char *) malloc(namelen + 1);
+        if (!str) {
+            fprintf(stderr, "Out of memory!\n");
+            exit(1);
+        }
+        memcpy(str, import_modules_table, namelen);
+        import_modules_table += namelen;
+        str[namelen] = '\0';
+        modules[i] = str;
+    } // for
 
     const LxObjectTableEntry *obj = ((const LxObjectTableEntry *) (exe + lx->object_table_offset));
     for (uint32 i = 0; i < lx->module_num_objects; i++, obj++) {
@@ -488,7 +519,7 @@ static __attribute__((noreturn)) void loadExe(const char *exefname, uint8 *exe, 
             } // switch
 
             // Now run any fixups for the page...
-            fixupPage(lx, obj, dst);
+            fixupPage(lx, modules, obj, dst);
 
             dst += lx->page_size;
         } // for
