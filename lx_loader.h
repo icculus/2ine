@@ -3,7 +3,10 @@
 
 #define _GNU_SOURCE 1
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 
 typedef uint8_t uint8;
 typedef uint16_t uint16;
@@ -88,6 +91,83 @@ typedef struct LxResourceTableEntry
 } LxResourceTableEntry;
 
 #pragma pack(pop)
+
+
+typedef struct LxMmaps
+{
+    void *addr;
+    size_t size;
+} LxMmaps;
+
+typedef struct LxExportedOrdinal
+{
+    uint32 ordinal;
+    uint32 addr;
+} LxExportedOrdinal;
+
+typedef struct LxExportedName
+{
+    char name[128];  // !!! FIXME: allocate this.
+    uint32 addr;
+} LxExportedName;
+
+struct LxModule;
+typedef struct LxModule LxModule;
+struct LxModule
+{
+    LxHeader lx;
+    uint32 refcount;
+    char name[256];  // !!! FIXME: allocate this.
+    LxModule **dependencies;
+    LxMmaps *mmaps;
+    uint32 num_ordinals;
+    LxExportedOrdinal *exported_ordinals;
+    uint32 num_names;
+    LxExportedName *exported_names;
+    void *nativelib;
+    uint32 eip;
+    uint32 esp;
+    LxModule *prev;  // all loaded modules are in a doubly-linked list.
+    LxModule *next;  // all loaded modules are in a doubly-linked list.
+};
+
+typedef LxModule *(*LxNativeReplacementEntryPoint)(void);
+
+// !!! FIXME: this is nasty for several reasons.
+#define NATIVE_REPLACEMENT_TABLE(modname) \
+    LxModule *loadNativeLxModule(void) { \
+        LxModule *retval = (LxModule *) malloc(sizeof (LxModule)); \
+        if (!retval) goto loadnative_failed; \
+        memset(retval, '\0', sizeof (LxModule)); \
+        retval->refcount = 1; \
+        strcpy(retval->name, modname); \
+
+#define NATIVE_REPLACEMENT(fn, ord) { \
+        void *ptr = realloc(retval->exported_names, (retval->num_names+1) * sizeof (LxExportedName)); \
+        if (!ptr) { goto loadnative_failed; } \
+        retval->exported_names = (LxExportedName *) ptr; \
+        strcpy(retval->exported_names[retval->num_names].name, #fn); \
+        retval->exported_names[retval->num_names].addr = (uint32) ((size_t) fn); \
+        retval->num_names++; \
+        ptr = realloc(retval->exported_ordinals, (retval->num_ordinals+1) * sizeof (LxExportedOrdinal)); \
+        if (!ptr) { goto loadnative_failed; } \
+        retval->exported_ordinals = (LxExportedOrdinal *) ptr; \
+        retval->exported_ordinals[retval->num_ordinals].ordinal = ord; \
+        retval->exported_ordinals[retval->num_ordinals].addr = (uint32) ((size_t) fn); \
+        retval->num_ordinals++; \
+        }
+
+#define END_NATIVE_REPLACEMENT_TABLE() \
+        return retval; \
+        \
+    loadnative_failed: \
+        if (retval) { \
+            free(retval->exported_ordinals); \
+            free(retval->exported_names); \
+            free(retval); \
+        } \
+        return NULL; \
+    }
 
 #endif
 

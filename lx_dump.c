@@ -62,6 +62,7 @@ static void parseExe(const char *exefname, uint8 *exe, uint32 exelen)
 {
     printf("%s\n", exefname);
 
+    const uint8 *origexe = exe;
     if (!sanityCheckExe(&exe, &exelen))
         return;
 
@@ -443,6 +444,33 @@ static void parseExe(const char *exefname, uint8 *exe, uint32 exelen)
         name[namelen] = '\0';
         printf("%u: %s\n", (unsigned int) i+1, name);
     }
+
+    const uint8 *name_table;
+
+    printf("Resident name table:\n");
+    name_table = exe + lx->resident_name_table_offset;
+    for (uint32 i = 0; *name_table; i++) {
+        const uint8 namelen = *(name_table++);
+        char name[256];
+        memcpy(name, name_table, namelen);
+        name[namelen] = '\0';
+        name_table += namelen;
+        const uint16 ordinal = *((const uint16 *) name_table); name_table += 2;
+        printf("%u: '%s' (ordinal %u)\n", (unsigned int) i, name, (unsigned int) ordinal);
+    } // for
+
+    printf("Non-resident name table:\n");
+    name_table = origexe + lx->non_resident_name_table_offset;
+    const uint8 *end_of_name_table = name_table + lx->non_resident_name_table_len;
+    for (uint32 i = 0; (name_table < end_of_name_table) && *name_table; i++) {
+        const uint8 namelen = *(name_table++);
+        char name[256];
+        memcpy(name, name_table, namelen);
+        name[namelen] = '\0';
+        name_table += namelen;
+        const uint16 ordinal = *((const uint16 *) name_table); name_table += 2;
+        printf("%u: '%s' (ordinal %u)\n", (unsigned int) i, name, (unsigned int) ordinal);
+    } // for
 
 #if 0
     const uint8 *fixup_record_table = exe + fixup_record_table_offset;
