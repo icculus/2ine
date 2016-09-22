@@ -634,10 +634,6 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
         if ((vsize % lx->page_size) != 0)
              vsize += lx->page_size - (vsize % lx->page_size);
 
-        const int prot = ((obj->object_flags & 0x1) ? PROT_READ : 0) |
-                         ((obj->object_flags & 0x2) ? PROT_WRITE : 0) |
-                         ((obj->object_flags & 0x4) ? PROT_EXEC : 0);
-
         void *base = (void *) ((size_t) obj->reloc_base_addr);
         const int mmapflags = MAP_ANON | MAP_PRIVATE | MAP_FIXED;
         void *mmapaddr = mmap(base, vsize, PROT_READ|PROT_WRITE, mmapflags, -1, 0);
@@ -692,9 +688,6 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
                     goto loadlx_failed;
             } // switch
 
-            // Now run any fixups for the page...
-            fixupPage(exe, retval, obj, dst);
-
             dst += lx->page_size;
         } // for
 
@@ -703,11 +696,32 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
         if (remain) {
             memset(dst, '\0', remain);
         } // if
+    } // for
+
+    // All the pages we need from the EXE are loaded into the appropriate spots in memory.
+    printf("mmap()'d everything we need!\n");
+
+    // Run through again and do all the fixups...
+    obj = ((const LxObjectTableEntry *) (exe + lx->object_table_offset));
+    for (uint32 i = 0; i < lx->module_num_objects; i++, obj++) {
+        if (obj->object_flags & 0x8)  // !!! FIXME: resource object; ignore this until resource support is written, later.
+            continue;
+
+        uint8 *dst = (uint8 *) retval->mmaps[i].addr;
+        const uint32 numPageTableEntries = obj->num_page_table_entries;
+        for (uint32 pagenum = 0; pagenum < numPageTableEntries; pagenum++) {
+            fixupPage(exe, retval, obj, dst);
+            dst += lx->page_size;
+        } // for
 
         // Now set all the pages of this object to the proper final permissions...
-        if (mprotect(mmapaddr, vsize, prot) == -1) {
+        const int prot = ((obj->object_flags & 0x1) ? PROT_READ : 0) |
+                         ((obj->object_flags & 0x2) ? PROT_WRITE : 0) |
+                         ((obj->object_flags & 0x4) ? PROT_EXEC : 0);
+
+        if (mprotect(retval->mmaps[i].addr, retval->mmaps[i].size, prot) == -1) {
             fprintf(stderr, "mprotect(%p, %u, %s%s%s, ANON|PRIVATE|FIXED, -1, 0) failed (%d): %s\n",
-                    base, (unsigned int) vsize,
+                    retval->mmaps[i].addr, (unsigned int) retval->mmaps[i].size,
                     (prot&PROT_READ) ? "R" : "-",
                     (prot&PROT_WRITE) ? "W" : "-",
                     (prot&PROT_EXEC) ? "X" : "-",
@@ -715,9 +729,6 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
             goto loadlx_failed;
         } // if
     } // for
-
-    // All the pages we need from the EXE are loaded into the appropriate spots in memory.
-    printf("mmap()'d everything we need!\n");
 
     retval->eip = lx->eip;
     if (lx->eip_object != 0) {
