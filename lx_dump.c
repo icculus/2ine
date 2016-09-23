@@ -327,6 +327,7 @@ static void parseExe(const char *exefname, uint8 *exe, uint32 exelen)
 
     printf("Entry table:\n");
     int bundleid = 1;
+    int ordinal = 1;
     const uint8 *entryptr = exe + lx->entry_table_offset;
     while (*entryptr) {  /* end field has a value of zero. */
         const uint8 numentries = *(entryptr++);  /* number of entries in this bundle */
@@ -343,13 +344,14 @@ static void parseExe(const char *exefname, uint8 *exe, uint32 exelen)
             case 0x00:
                 printf("UNUSED\n");
                 printf(" %u unused entries.\n\n", (unsigned int) numentries);
+                ordinal += numentries;
                 break;
 
             case 0x01:
                 printf("16BIT\n");
                 printf(" Object number: %u\n", (unsigned int) *((const uint16 *) entryptr)); entryptr += 2;
                 for (uint8 i = 0; i < numentries; i++) {
-                    printf(" %u:\n", (unsigned int) i);
+                    printf(" %d:\n", ordinal++);
                     printf(" Flags:");
                     if (*entryptr & 0x1) printf(" EXPORTED");
                     printf("\n");
@@ -363,7 +365,7 @@ static void parseExe(const char *exefname, uint8 *exe, uint32 exelen)
                 printf("286CALLGATE\n");
                 printf(" Object number: %u\n", (unsigned int) *((const uint16 *) entryptr)); entryptr += 2;
                 for (uint8 i = 0; i < numentries; i++) {
-                    printf(" %u:\n", (unsigned int) i);
+                    printf(" %d:\n", ordinal++);
                     printf(" Flags:");
                     if (*entryptr & 0x1) printf(" EXPORTED");
                     printf("\n");
@@ -377,7 +379,7 @@ static void parseExe(const char *exefname, uint8 *exe, uint32 exelen)
             case 0x03: printf("32BIT\n");
                 printf(" Object number: %u\n", (unsigned int) *((const uint16 *) entryptr)); entryptr += 2;
                 for (uint8 i = 0; i < numentries; i++) {
-                    printf(" %u:\n", (unsigned int) i);
+                    printf(" %d:\n", ordinal++);
                     printf(" Flags:");
                     if (*entryptr & 0x1) printf(" EXPORTED");
                     printf("\n");
@@ -390,7 +392,7 @@ static void parseExe(const char *exefname, uint8 *exe, uint32 exelen)
             case 0x04: printf("FORWARDER\n"); break;
                 printf(" Reserved field: %u\n", (unsigned int) *((const uint16 *) entryptr)); entryptr += 2;
                 for (uint8 i = 0; i < numentries; i++) {
-                    printf(" %u:\n", (unsigned int) i);
+                    printf(" %d:\n", ordinal++);
                     printf(" Flags:");
                     const int isordinal = (*entryptr & 0x1);
                     if (isordinal) printf(" IMPORTBYORDINAL");
@@ -416,7 +418,7 @@ static void parseExe(const char *exefname, uint8 *exe, uint32 exelen)
     printf("Module directives (%u entries):\n", (unsigned int) lx->num_module_directives);
     const uint8 *dirptr = exe + lx->module_directives_offset;
     for (uint32 i = 0; i < lx->num_module_directives; i++) {
-        printf("%u:\n", (unsigned int) i);
+        printf("%u:\n", (unsigned int) i+1);
         printf("Directive ID: %u\n", (unsigned int) *((const uint16 *) dirptr)); dirptr += 2;
         printf("Data size: %u\n", (unsigned int) *((const uint16 *) dirptr)); dirptr += 2;
         printf("Data offset: %u\n", (unsigned int) *((const uint32 *) dirptr)); dirptr += 4;

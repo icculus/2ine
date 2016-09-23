@@ -602,6 +602,9 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
     printf("ref'd new module '%s' to %u\n", modname, 1);
 
     // !!! FIXME: apparently OS/2 does 1024, but they're not loading the module into RAM each time.
+    // !!! FIXME: the spec mentions the 1024 thing for "forwarder" records in the entry table,
+    // !!! FIXME:  specifically. _Can_ two DLLs depend on each other? We'll have to load both and
+    // !!! FIXME:  then fix them up without recursing.
     if (++dependency_tree_depth > 32) {
         fprintf(stderr, "Likely circular dependency in module '%s'\n", modname);
             goto loadlx_failed;
