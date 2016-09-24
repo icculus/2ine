@@ -478,8 +478,8 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
 
                 // !!! FIXME: I have no idea if this is right at all.
                 // !!! FIXME: Is this guaranteed to not references object pages I haven't loaded/fixed up yet?
-                const LxObjectTableEntry *targetobj = ((const LxObjectTableEntry *) (exe + lx->object_table_offset)) + (objectid - 1);
-                const uint8 *ptr = (uint8 *) ((size_t) (targetobj->reloc_base_addr + targetoffset));
+                const size_t base = (size_t) lxmod->mmaps[objectid - 1].addr;
+                const uint8 *ptr = (uint8 *) (base + targetoffset);
                 switch (finalsize) {
                     case 1: finalval = (uint32) *((uint8 *) ptr); break;
                     case 2: finalval = (uint32) *((uint16 *) ptr); break;
@@ -621,14 +621,13 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
         if ((vsize % lx->page_size) != 0)
              vsize += lx->page_size - (vsize % lx->page_size);
 
-        void *base = (void *) ((size_t) obj->reloc_base_addr);
-        const int mmapflags = MAP_ANON | MAP_PRIVATE | MAP_FIXED;
-        void *mmapaddr = mmap(base, vsize, PROT_READ|PROT_WRITE, mmapflags, -1, 0);
+        const int mmapflags = MAP_ANON | MAP_PRIVATE;
+        void *mmapaddr = mmap(NULL, vsize, PROT_READ|PROT_WRITE, mmapflags, -1, 0);
         // we'll mprotect() these pages to the proper permissions later.
 
         if (mmapaddr == ((void *) MAP_FAILED)) {
-            fprintf(stderr, "mmap(%p, %u, RW-, ANON|PRIVATE|FIXED, -1, 0) failed (%d): %s\n",
-                    base, (unsigned int) vsize, errno, strerror(errno));
+            fprintf(stderr, "mmap(NULL, %u, RW-, ANON|PRIVATE, -1, 0) failed (%d): %s\n",
+                    (unsigned int) vsize, errno, strerror(errno));
             goto loadlx_failed;
         } // if
 
@@ -811,16 +810,16 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
 
     retval->eip = lx->eip;
     if (lx->eip_object != 0) {
-        const LxObjectTableEntry *targetobj = ((const LxObjectTableEntry *) (exe + lx->object_table_offset)) + (lx->eip_object - 1);
-        retval->eip += targetobj->reloc_base_addr;
+        const uint32 base = (uint32) ((size_t)retval->mmaps[lx->eip_object - 1].addr);
+        retval->eip += base;
     } // if
 
     // !!! FIXME: esp==0 means something special for programs (and is ignored for library init).
     // !!! FIXME: "A zero value in this field indicates that the stack pointer is to be initialized to the highest address/offset in the object"
     retval->esp = lx->esp;
     if (lx->esp_object != 0) {  // !!! FIXME: ignore for libraries
-        const LxObjectTableEntry *targetobj = ((const LxObjectTableEntry *) (exe + lx->object_table_offset)) + (lx->esp_object - 1);
-        retval->esp += targetobj->reloc_base_addr;
+        const uint32 base = (uint32) ((size_t)retval->mmaps[lx->esp_object - 1].addr);
+        retval->esp += base;
     } // if
 
     // module is ready to use, put it in the loaded list.
