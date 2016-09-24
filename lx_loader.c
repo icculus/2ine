@@ -293,6 +293,8 @@ static __attribute__((noreturn)) void runLxModule(const LxModule *lxmod, const i
         // !!! FIXME: init other registers!
         "ret               \n\t"  // go to OS/2 land!
         "1:                \n\t"  //  ...and return here.
+        "andl $-16, %%esp  \n\t"  // align the stack for macOS.
+        "subl $-4, %%esp  \n\t"   // align the stack for macOS.
         "pushl %%eax       \n\t"  // call _exit() with whatever is in %eax.
         "call _exit        \n\t"
             : // no outputs
