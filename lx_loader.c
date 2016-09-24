@@ -411,10 +411,10 @@ static void doFixup(uint8 *page, const uint16 offset, const uint32 finalval, con
     } // switch
 } // doFixup
 
-static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntry *obj, uint8 *page)
+static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntry *obj, const uint32 pagenum,  uint8 *page)
 {
     const LxHeader *lx = &lxmod->lx;
-    const uint32 *fixuppage = (((const uint32 *) (exe + lx->fixup_page_table_offset)) + (obj->page_table_index - 1));
+    const uint32 *fixuppage = (((const uint32 *) (exe + lx->fixup_page_table_offset)) + ((obj->page_table_index - 1) + pagenum));
     const uint32 fixupoffset = *fixuppage;
     const uint32 fixuplen = fixuppage[1] - fixuppage[0];
     const uint8 *fixup = (exe + lx->fixup_record_table_offset) + fixupoffset;
@@ -610,24 +610,6 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
             goto loadlx_failed;
     } // if
 
-    const uint8 *import_modules_table = exe + lx->import_module_table_offset;
-    for (uint32 i = 0; i < lx->num_import_mod_entries; i++) {
-        const uint8 namelen = *(import_modules_table++);
-        if (namelen > 127) {
-            fprintf(stderr, "Import module %u name is > 127 chars (%u). Corrupt file or bug!\n", (unsigned int) (i + 1), (unsigned int) namelen);
-            goto loadlx_failed;
-        }
-        char name[128];
-        memcpy(name, import_modules_table, namelen);
-        import_modules_table += namelen;
-        name[namelen] = '\0';
-        retval->dependencies[i] = loadLxModuleByModuleNameInternal(name, dependency_tree_depth);
-        if (!retval->dependencies[i]) {
-            fprintf(stderr, "Failed to load dependency '%s' for module '%s'\n", name, modname);
-            goto loadlx_failed;
-        } // if
-    } // for
-
     const LxObjectTableEntry *obj = ((const LxObjectTableEntry *) (exe + lx->object_table_offset));
     for (uint32 i = 0; i < lx->module_num_objects; i++, obj++) {
         if (obj->object_flags & 0x8)  // !!! FIXME: resource object; ignore this until resource support is written, later.
@@ -704,6 +686,98 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
     // All the pages we need from the EXE are loaded into the appropriate spots in memory.
     printf("mmap()'d everything we need!\n");
 
+    // Set up our exports...
+    uint32 total_ordinals = 0;
+    const uint8 *entryptr = exe + lx->entry_table_offset;
+    while (*entryptr) {  /* end field has a value of zero. */
+        const uint8 numentries = *(entryptr++);  /* number of entries in this bundle */
+        const uint8 bundletype = *(entryptr++) & ~0x80;
+        if (bundletype != 0x00) {
+            total_ordinals += numentries;
+            entryptr += 2 + ((bundletype == 0x01) ? 3 : 5) * numentries;
+        }
+    } // while
+
+    retval->exported_ordinals = (LxExportedOrdinal *) malloc(sizeof (LxExportedOrdinal) * total_ordinals);
+    if (!retval->exported_ordinals) {
+        fprintf(stderr, "Out of memory!\n");
+        goto loadlx_failed;
+    } // if
+    memset(retval->exported_ordinals, '\0', sizeof (LxExportedOrdinal) * total_ordinals);
+
+    LxExportedOrdinal *expord = retval->exported_ordinals;
+    uint32 ordinal = 1;
+    entryptr = exe + lx->entry_table_offset;
+    while (*entryptr) {  /* end field has a value of zero. */
+        const uint8 numentries = *(entryptr++);  /* number of entries in this bundle */
+        const uint8 bundletype = *(entryptr++) & ~0x80;
+        obj = ((const LxObjectTableEntry *) (exe + lx->object_table_offset));
+
+        switch (bundletype) {
+            case 0x00: // UNUSED
+                ordinal += numentries;
+                break;
+
+            case 0x01: // 16BIT
+                obj += *((const uint16 *) entryptr);
+                entryptr += 2;
+                for (uint8 i = 0; i < numentries; i++) {
+                    entryptr++;
+                    expord->ordinal = ordinal++;
+                    expord->addr = obj->reloc_base_addr + *((const uint16 *) entryptr);
+                    expord++;
+                    entryptr += 2;
+                } // for
+                break;
+
+            case 0x03: // 32BIT
+                obj += *((const uint16 *) entryptr);
+                entryptr += 2;
+                for (uint8 i = 0; i < numentries; i++) {
+                    entryptr++;
+                    expord->ordinal = ordinal++;
+                    expord->addr = obj->reloc_base_addr + *((const uint32 *) entryptr);
+                    expord++;
+                    entryptr += 4;
+                }
+                break;
+
+            case 0x02: // 286CALLGATE
+            case 0x04: // FORWARDER
+                fprintf(stderr, "WRITE ME %s:%d\n", __FILE__, __LINE__);
+                goto loadlx_failed;
+
+            default:
+                fprintf(stderr, "UNKNOWN ENTRY TYPE (%u)\n\n", (unsigned int) bundletype);
+                goto loadlx_failed;
+        } // switch
+    } // while
+
+    retval->num_ordinals = (uint32) (expord - retval->exported_ordinals);
+
+    // Now load named entry points.
+    printf("FIXME: load named entry points\n");
+
+    // Load other dependencies of this module.
+    const uint8 *import_modules_table = exe + lx->import_module_table_offset;
+    for (uint32 i = 0; i < lx->num_import_mod_entries; i++) {
+        const uint8 namelen = *(import_modules_table++);
+        if (namelen > 127) {
+            fprintf(stderr, "Import module %u name is > 127 chars (%u). Corrupt file or bug!\n", (unsigned int) (i + 1), (unsigned int) namelen);
+            goto loadlx_failed;
+        }
+        char name[128];
+        memcpy(name, import_modules_table, namelen);
+        import_modules_table += namelen;
+        name[namelen] = '\0';
+        retval->dependencies[i] = loadLxModuleByModuleNameInternal(name, dependency_tree_depth);
+        if (!retval->dependencies[i]) {
+            fprintf(stderr, "Failed to load dependency '%s' for module '%s'\n", name, modname);
+            goto loadlx_failed;
+        } // if
+    } // for
+
+
     // Run through again and do all the fixups...
     obj = ((const LxObjectTableEntry *) (exe + lx->object_table_offset));
     for (uint32 i = 0; i < lx->module_num_objects; i++, obj++) {
@@ -713,7 +787,7 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
         uint8 *dst = (uint8 *) retval->mmaps[i].addr;
         const uint32 numPageTableEntries = obj->num_page_table_entries;
         for (uint32 pagenum = 0; pagenum < numPageTableEntries; pagenum++) {
-            fixupPage(exe, retval, obj, dst);
+            fixupPage(exe, retval, obj, pagenum, dst);
             dst += lx->page_size;
         } // for
 
