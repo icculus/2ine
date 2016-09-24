@@ -387,9 +387,9 @@ static void doFixup(uint8 *page, const uint16 offset, const uint32 finalval, con
 {
     #if 1
     if (finalsize == 6) {
-        printf("fixing up %p to to 0x%X:0x%X (6 bytes)...\n", page + offset, (unsigned int) finalval2, (unsigned int) finalval);
+        printf("fixing up %p to 0x%X:0x%X (6 bytes)...\n", page + offset, (unsigned int) finalval2, (unsigned int) finalval);
     } else {
-        printf("fixing up %p to to 0x%X (%u bytes)...\n", page + offset, (unsigned int) finalval, (unsigned int) finalsize);
+        printf("fixing up %p to 0x%X (%u bytes)...\n", page + offset, (unsigned int) finalval, (unsigned int) finalsize);
     } // else
     fflush(stdout);
     #endif
