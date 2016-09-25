@@ -162,7 +162,7 @@ static void parseExe(const char *exefname, uint8 *exe, uint32 exelen)
         printf("Object pages:\n");
         const LxObjectPageTableEntry *objpage = ((const LxObjectPageTableEntry *) (exe + lx->object_page_table_offset)) + (obj->page_table_index - 1);
         const uint32 *fixuppage = (((const uint32 *) (exe + lx->fixup_page_table_offset)) + (obj->page_table_index - 1));
-        for (uint32 i = 0; i < obj->num_page_table_entries; i++, objpage++) {
+        for (uint32 i = 0; i < obj->num_page_table_entries; i++, objpage++, fixuppage++) {
             printf("Object Page #%u:\n", (unsigned int) (i + obj->page_table_index));
             printf("Page data offset: 0x%X\n", (unsigned int) objpage->page_data_offset);
             printf("Page data size: %u\n", (unsigned int) objpage->data_size);
@@ -222,8 +222,8 @@ static void parseExe(const char *exefname, uint8 *exe, uint32 exelen)
                     srclist_count = *(fixup++);
                     printf("Source offset list count: %u\n", (unsigned int) srclist_count);
                 } else {
-                    const uint16 srcoffset = *((uint16 *) fixup); fixup += 2;
-                    printf("Source offset: %u\n", (unsigned int) srcoffset);
+                    const sint16 srcoffset = *((sint16 *) fixup); fixup += 2;
+                    printf("Source offset: %d\n", (int) srcoffset);
                 } // else
                 printf("\n");
 
@@ -298,8 +298,8 @@ static void parseExe(const char *exefname, uint8 *exe, uint32 exelen)
                 if (srctype & 0x20) { // source list
                     printf("Source offset list:");
                     for (uint8 i = 0; i < srclist_count; i++) {
-                        const uint16 val = *((uint16 *) fixup); fixup += 2;
-                        printf(" %u", (unsigned int) val);
+                        const sint16 val = *((sint16 *) fixup); fixup += 2;
+                        printf(" %d", (int) val);
                     } // for
                 } // if
 

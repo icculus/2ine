@@ -390,7 +390,7 @@ static uint32 getModuleProcAddrByName(const LxModule *module, const char *name)
 } // getModuleProcAddrByName
 #endif
 
-static void doFixup(uint8 *page, const uint16 offset, const uint32 finalval, const uint16 finalval2, const uint32 finalsize)
+static void doFixup(uint8 *page, const sint16 offset, const uint32 finalval, const uint16 finalval2, const uint32 finalsize)
 {
     #if 1
     if (finalsize == 6) {
@@ -418,7 +418,7 @@ static void doFixup(uint8 *page, const uint16 offset, const uint32 finalval, con
     } // switch
 } // doFixup
 
-static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntry *obj, const uint32 pagenum,  uint8 *page)
+static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntry *obj, const uint32 pagenum, uint8 *page)
 {
     const LxHeader *lx = &lxmod->lx;
     const uint32 *fixuppage = (((const uint32 *) (exe + lx->fixup_page_table_offset)) + ((obj->page_table_index - 1) + pagenum));
@@ -431,7 +431,7 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
         const uint8 srctype = *(fixup++);
         const uint8 fixupflags = *(fixup++);
         uint8 srclist_count = 0;
-        uint16 srcoffset = 0;
+        sint16 srcoffset = 0;
 
         uint32 finalval = 0;
         uint16 finalval2 = 0;
@@ -458,7 +458,7 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
         if (srctype & 0x20) { // contains a source list
             srclist_count = *(fixup++);
         } else {
-            srcoffset = *((uint16 *) fixup);
+            srcoffset = *((sint16 *) fixup);
             fixup += 2;
         } // else
 
@@ -547,7 +547,7 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
 
         if (srctype & 0x20) {  // source list
             for (uint8 i = 0; i < srclist_count; i++) {
-                const uint16 offset = *((uint16 *) fixup); fixup += 2;
+                const sint16 offset = *((sint16 *) fixup); fixup += 2;
                 if ((srctype & 0xF) == 0x08) {  // self-relative fixup?
                     assert(finalval2 == 0);
                     doFixup(page, offset, finalval - (((uint32)page)+offset+4), 0, finalsize);
