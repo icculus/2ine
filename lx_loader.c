@@ -63,6 +63,11 @@ static int sanityCheckLxModule(uint8 **_exe, uint32 *_exelen)
         return 0;
     }
 
+    if (lx->module_flags & 0x2000) {
+        fprintf(stderr, "Module is flagged as not-loadable\n");
+        return 0;
+    }
+
     // !!! FIXME: check if EIP and ESP are non-zero vs per-process library bits, etc.
 
     return 1;
