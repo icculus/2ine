@@ -534,16 +534,16 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
             } // case
         } // switch
 
-        uint32 additive = 0;
         if (fixupflags & 0x4) {  // Has additive.
+            uint32 additive = 0;
             if (fixupflags & 0x20) { // 32-bit value
                 additive = *((uint32 *) fixup); fixup += 4;
             } else {  // 16-bit value
                 additive = (uint32) *((uint16 *) fixup);
                 fixup += 2;
             } // else
+            finalval += additive;
         } // if
-        finalval += additive;
 
         if (srctype & 0x20) {  // source list
             for (uint8 i = 0; i < srclist_count; i++) {
@@ -566,6 +566,7 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
     } // while
 } // fixupPage
 
+// !!! FIXME: break up this function.
 static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_depth)
 {
     LxModule *retval = NULL;
@@ -576,6 +577,14 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
         goto loadlx_failed;
 
     const LxHeader *lx = (const LxHeader *) exe;
+    const uint32 module_type = lx->module_flags & 0x00038000;
+
+    if ((module_type != 0x0000) && (module_type != 0x8000)) {
+        fprintf(stderr, "This is not a standard .exe or .dll (maybe device driver?)\n");
+        goto loadlx_failed;
+    } // if
+
+    const int isDLL = module_type == 0x8000;
 
     retval = (LxModule *) malloc(sizeof (LxModule));
     if (!retval) {
@@ -626,13 +635,14 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
         if ((vsize % lx->page_size) != 0)
              vsize += lx->page_size - (vsize % lx->page_size);
 
-        const int mmapflags = MAP_ANON | MAP_PRIVATE;
-        void *mmapaddr = mmap(NULL, vsize, PROT_READ|PROT_WRITE, mmapflags, -1, 0);
+        const int mmapflags = MAP_ANON | MAP_PRIVATE | (isDLL ? 0 : MAP_FIXED);
+        void *base = isDLL ? NULL : (void *) ((size_t) obj->reloc_base_addr);
+        void *mmapaddr = mmap(base, vsize, PROT_READ|PROT_WRITE, mmapflags, -1, 0);
         // we'll mprotect() these pages to the proper permissions later.
 
         if (mmapaddr == ((void *) MAP_FAILED)) {
-            fprintf(stderr, "mmap(NULL, %u, RW-, ANON|PRIVATE, -1, 0) failed (%d): %s\n",
-                    (unsigned int) vsize, errno, strerror(errno));
+            fprintf(stderr, "mmap(%p, %u, RW-, ANON|PRIVATE%s, -1, 0) failed (%d): %s\n",
+                    base, (unsigned int) vsize, isDLL ? "" : "|FIXED", errno, strerror(errno));
             goto loadlx_failed;
         } // if
 
@@ -829,11 +839,13 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
 
     // module is ready to use, put it in the loaded list.
     // !!! FIXME: mutex this
-    if (GLoadedModules) {
-        retval->next = GLoadedModules;
-        GLoadedModules->prev = retval;
+    if (isDLL) {
+        if (GLoadedModules) {
+            retval->next = GLoadedModules;
+            GLoadedModules->prev = retval;
+        } // if
+        GLoadedModules = retval;
     } // if
-    GLoadedModules = retval;
 
     return retval;
 
