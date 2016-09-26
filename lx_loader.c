@@ -795,7 +795,7 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
     while (*entryptr) {  /* end field has a value of zero. */
         const uint8 numentries = *(entryptr++);  /* number of entries in this bundle */
         const uint8 bundletype = *(entryptr++) & ~0x80;
-        obj = ((const LxObjectTableEntry *) (exe + lx->object_table_offset));
+        uint16 objidx = 0;
 
         switch (bundletype) {
             case 0x00: // UNUSED
@@ -803,24 +803,24 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
                 break;
 
             case 0x01: // 16BIT
-                obj += *((const uint16 *) entryptr);
+                objidx = *((const uint16 *) entryptr) - 1;
                 entryptr += 2;
                 for (uint8 i = 0; i < numentries; i++) {
                     entryptr++;
                     expord->ordinal = ordinal++;
-                    expord->addr = obj->reloc_base_addr + *((const uint16 *) entryptr);
+                    expord->addr = ((uint8 *) retval->mmaps[objidx].addr) + *((const uint16 *) entryptr);
                     expord++;
                     entryptr += 2;
                 } // for
                 break;
 
             case 0x03: // 32BIT
-                obj += *((const uint16 *) entryptr);
+                objidx = *((const uint16 *) entryptr) - 1;
                 entryptr += 2;
                 for (uint8 i = 0; i < numentries; i++) {
                     entryptr++;
                     expord->ordinal = ordinal++;
-                    expord->addr = obj->reloc_base_addr + *((const uint32 *) entryptr);
+                    expord->addr = ((uint8 *) retval->mmaps[objidx].addr) + *((const uint32 *) entryptr);
                     expord++;
                     entryptr += 4;
                 }
