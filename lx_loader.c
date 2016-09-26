@@ -481,16 +481,8 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
                     } // else
                 } // if
 
-                // !!! FIXME: I have no idea if this is right at all.
-                // !!! FIXME: Is this guaranteed to not references object pages I haven't loaded/fixed up yet?
-                const size_t base = (size_t) lxmod->mmaps[objectid - 1].addr;
-                const uint8 *ptr = (uint8 *) (base + targetoffset);
-                switch (finalsize) {
-                    case 1: finalval = (uint32) *((uint8 *) ptr); break;
-                    case 2: finalval = (uint32) *((uint16 *) ptr); break;
-                    case 4: finalval = (uint32) *((uint32 *) ptr); break;
-                    case 6: finalval2 = (uint32) *((uint16 *) ptr); finalval = (uint32) *((uint32 *) (ptr + 2)); break;
-                } // switch
+                const uint32 base = (uint32) (size_t) lxmod->mmaps[objectid - 1].addr;
+                finalval = base + targetoffset;
                 break;
             } // case
 
