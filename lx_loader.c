@@ -13,6 +13,7 @@
 #include "lx_loader.h"
 
 static LxModule *GLoadedModules = NULL;
+static LxModule *GProgramModule = NULL;
 
 // !!! FIXME: move this into an lx_common.c file.
 static int sanityCheckLxModule(uint8 **_exe, uint32 *_exelen)
@@ -310,6 +311,49 @@ static __attribute__((noreturn)) void runLxModule(const LxModule *lxmod, const i
     __builtin_unreachable();
 } // runLxModule
 
+static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
+{
+    // ...and you pass it the pointer to argv0. This is (at least as far as the docs suggest) appended to the environment table.
+    printf("jumping into LX land to %s library...! eip=0x%X esp=0x%X\n", isTermination ? "terminate" : "initialize", (unsigned int) lxmod->eip, (unsigned int) GProgramModule->esp); fflush(stdout);
+
+    // !!! FIXME: need to set up OS/2 TIB and put it in FS register.
+    __asm__ __volatile__ (
+        "pushal            \n\t"  // save all the current registers.
+        "pushfl            \n\t"  // save all the current flags.
+        "movl %%esp,%%ecx  \n\t"  // save our stack to a temporary register.
+        "movl %%esi,%%esp  \n\t"  // use the OS/2 process's stack.
+        "pushl %%ecx       \n\t"  // save original stack pointer for real.
+        "pushl %%eax       \n\t"  // isTermination
+        "pushl $0          \n\t"  // library module handle  !!! FIXME
+        "leal 1f,%%eax     \n\t"  // address that entry point should return to.
+        "pushl %%eax       \n\t"
+        "pushl %%edi       \n\t"  // the OS/2 library entry point (we'll "ret" to it instead of jmp, so stack and registers are all correct).
+        "xorl %%eax,%%eax  \n\t"
+        "xorl %%ebx,%%ebx  \n\t"
+        "xorl %%ecx,%%ecx  \n\t"
+        "xorl %%edx,%%edx  \n\t"
+        "xorl %%esi,%%esi  \n\t"
+        "xorl %%edi,%%edi  \n\t"
+        "xorl %%ebp,%%ebp  \n\t"
+        // !!! FIXME: init other registers!
+        "ret               \n\t"  // go to OS/2 land!
+        "1:                \n\t"  //  ...and return here.
+        "addl $8,%%esp      \n\t"  // drop arguments to entry point.
+        "popl %%esp        \n\t"  // restore native process stack now.
+        "popfl             \n\t"  // restore our original flags.
+        "popal             \n\t"  // restore our original registers.
+            : // no outputs
+            : "a" (isTermination), "S" (GProgramModule->esp), "D" (lxmod->eip)
+            : "memory"
+    );
+
+    // !!! FIXME: this entry point returns a result...do we abort if it reports error?
+    printf("...survived time in LX land!\n"); fflush(stdout);
+} // runLxLibraryInitOrTerm
+
+static inline void runLxLibraryInit(LxModule *lxmod) { runLxLibraryInitOrTerm(lxmod, 0); }
+static inline void runLxLibraryTerm(LxModule *lxmod) { runLxLibraryInitOrTerm(lxmod, 1); }
+
 static void freeLxModule(LxModule *lxmod)
 {
     if (!lxmod)
@@ -321,6 +365,9 @@ static void freeLxModule(LxModule *lxmod)
     if (lxmod->refcount > 0)
         return;  // something is still using it.
 
+    if (lxmod->initialized)
+        runLxLibraryTerm(lxmod);
+
     if (lxmod->next)
         lxmod->next->prev = lxmod->prev;
 
@@ -329,6 +376,9 @@ static void freeLxModule(LxModule *lxmod)
 
     if (lxmod == GLoadedModules)
         GLoadedModules = lxmod->next;
+
+    if (GProgramModule == lxmod)
+        GProgramModule = NULL;
     // !!! FIXME: mutex to here
 
     for (uint32 i = 0; i < lxmod->lx.num_import_mod_entries; i++)
@@ -576,7 +626,15 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
         goto loadlx_failed;
     } // if
 
-    const int isDLL = module_type == 0x8000;
+    const int isDLL = (module_type == 0x8000);
+
+    if (isDLL && !GProgramModule) {
+        fprintf(stderr, "uhoh, need to load an .exe before a .dll!\n");
+        goto loadlx_failed;
+    } else if (!isDLL && GProgramModule) {
+        fprintf(stderr, "uhoh, loading an .exe after already loading one!\n");
+        goto loadlx_failed;
+    } // if else if
 
     retval = (LxModule *) malloc(sizeof (LxModule));
     if (!retval) {
@@ -605,6 +663,10 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
         } // for
         *ptr = '\0';
     } // if
+
+    if (!isDLL) { // !!! FIXME: mutex?
+        GProgramModule = retval;
+    } // else if
 
     const char *modname = retval->name;
     printf("ref'd new module '%s' to %u\n", modname, 1);
@@ -693,6 +755,20 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
 
     // All the pages we need from the EXE are loaded into the appropriate spots in memory.
     printf("mmap()'d everything we need!\n");
+
+    retval->eip = lx->eip;
+    if (lx->eip_object != 0) {
+        const uint32 base = (uint32) ((size_t)retval->mmaps[lx->eip_object - 1].addr);
+        retval->eip += base;
+    } // if
+
+    // !!! FIXME: esp==0 means something special for programs (and is ignored for library init).
+    // !!! FIXME: "A zero value in this field indicates that the stack pointer is to be initialized to the highest address/offset in the object"
+    retval->esp = lx->esp;
+    if (lx->esp_object != 0) {  // !!! FIXME: ignore for libraries
+        const uint32 base = (uint32) ((size_t)retval->mmaps[lx->esp_object - 1].addr);
+        retval->esp += base;
+    } // if
 
     // Set up our exports...
     uint32 total_ordinals = 0;
@@ -785,7 +861,6 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
         } // if
     } // for
 
-
     // Run through again and do all the fixups...
     obj = ((const LxObjectTableEntry *) (exe + lx->object_table_offset));
     for (uint32 i = 0; i < lx->module_num_objects; i++, obj++) {
@@ -815,23 +890,20 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
         } // if
     } // for
 
-    retval->eip = lx->eip;
-    if (lx->eip_object != 0) {
-        const uint32 base = (uint32) ((size_t)retval->mmaps[lx->eip_object - 1].addr);
-        retval->eip += base;
-    } // if
+    if (!isDLL) {
+        retval->initialized = 1;
+    } else {
+        // call library init code...
+        if (retval->eip) {
+            assert(GProgramModule != NULL);
+            assert(GProgramModule != retval);
+            runLxLibraryInit(retval);
+        } // if
 
-    // !!! FIXME: esp==0 means something special for programs (and is ignored for library init).
-    // !!! FIXME: "A zero value in this field indicates that the stack pointer is to be initialized to the highest address/offset in the object"
-    retval->esp = lx->esp;
-    if (lx->esp_object != 0) {  // !!! FIXME: ignore for libraries
-        const uint32 base = (uint32) ((size_t)retval->mmaps[lx->esp_object - 1].addr);
-        retval->esp += base;
-    } // if
+        retval->initialized = 1;
 
-    // module is ready to use, put it in the loaded list.
-    // !!! FIXME: mutex this
-    if (isDLL) {
+        // module is ready to use, put it in the loaded list.
+        // !!! FIXME: mutex this
         if (GLoadedModules) {
             retval->next = GLoadedModules;
             GLoadedModules->prev = retval;

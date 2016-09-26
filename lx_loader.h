@@ -131,6 +131,7 @@ struct LxModule
     void *nativelib;
     uint32 eip;
     uint32 esp;
+    int initialized;
     LxModule *prev;  // all loaded modules are in a doubly-linked list.
     LxModule *next;  // all loaded modules are in a doubly-linked list.
 };
