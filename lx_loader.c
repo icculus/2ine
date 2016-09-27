@@ -249,7 +249,7 @@ static __attribute__((noreturn)) void runLxModule(const LxModule *lxmod, const i
     // !!! FIXME:  eventually, the environment table looks like this (double-null to terminate list):  var1=a\0var2=b\0var3=c\0\0
     // The command line, if I'm reading the Open Watcom __OS2Main() implementation correctly, looks like this...
     //   \0programname\0argv0\0argv1\0argvN\0
-    size_t len = 0;
+    size_t len = strlen(argv[0]) + 1;
     for (int i = 0; i < argc; i++) {
         len += strlen(argv[i]) + 1;
     }
