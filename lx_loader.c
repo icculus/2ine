@@ -179,9 +179,13 @@ static int decompressExePack2(uint8 *dst, const uint32 dstlen, const uint8 *src,
 
 static void missingEntryPointCalled(const char *module, const char *entry)
 {
+    void ***ebp = NULL;
+    __asm__ __volatile__ ( "movl %%ebp, %%eax  \n\t" : "=a" (ebp) );
+    void *caller = ebp[0][1];
+
     fflush(stdout);
     fflush(stderr);
-    fprintf(stderr, "\n\nMissing entry point '%s' in module '%s' called!\n", entry, module);
+    fprintf(stderr, "\n\nMissing entry point '%s' in module '%s' called at %p!\n", entry, module, caller);
     fprintf(stderr, "Aborting.\n\n\n");
     //STUBBED("output backtrace");
     fflush(stderr);
