@@ -1055,7 +1055,7 @@ static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int
     snprintf(fname, sizeof (fname), "%s.dll", modname);
     LxModule *retval = loadLxModuleByPathInternal(fname, dependency_tree_depth);
     if (!retval) {
-        snprintf(fname, sizeof (fname), "native/%s.so", modname);
+        snprintf(fname, sizeof (fname), "./lib%s.so", modname);
         for (char *ptr = fname; *ptr; ptr++) {
             *ptr = (((*ptr >= 'A') && (*ptr <= 'Z')) ? (*ptr - ('A' - 'a')) : *ptr);
         } // for
