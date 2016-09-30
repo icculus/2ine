@@ -132,47 +132,21 @@ struct LxModule
     uint32 eip;
     uint32 esp;
     int initialized;
+    char *env;
+    char *cmd;
+    char *os2path;  // absolute path to module, in OS/2 format
+    uint32 signal_exception_focus_count;
     LxModule *prev;  // all loaded modules are in a doubly-linked list.
     LxModule *next;  // all loaded modules are in a doubly-linked list.
 };
 
-typedef LxModule *(*LxNativeReplacementEntryPoint)(void);
+typedef struct
+{
+    LxModule *loaded_modules;
+    LxModule *main_module;
+} LxLoaderState;
 
-// !!! FIXME: this is nasty for several reasons.
-#define NATIVE_REPLACEMENT_TABLE(modname) \
-    LxModule *loadNativeLxModule(void) { \
-        LxModule *retval = (LxModule *) malloc(sizeof (LxModule)); \
-        if (!retval) goto loadnative_failed; \
-        memset(retval, '\0', sizeof (LxModule)); \
-        retval->refcount = 1; \
-        strcpy(retval->name, modname); \
-
-#define NATIVE_REPLACEMENT(fn, ord) { \
-        void *ptr = realloc(retval->exported_names, (retval->num_names+1) * sizeof (LxExportedName)); \
-        if (!ptr) { goto loadnative_failed; } \
-        retval->exported_names = (LxExportedName *) ptr; \
-        strcpy(retval->exported_names[retval->num_names].name, #fn); \
-        retval->exported_names[retval->num_names].addr = (uint32) ((size_t) fn); \
-        retval->num_names++; \
-        ptr = realloc(retval->exported_ordinals, (retval->num_ordinals+1) * sizeof (LxExportedOrdinal)); \
-        if (!ptr) { goto loadnative_failed; } \
-        retval->exported_ordinals = (LxExportedOrdinal *) ptr; \
-        retval->exported_ordinals[retval->num_ordinals].ordinal = ord; \
-        retval->exported_ordinals[retval->num_ordinals].addr = (uint32) ((size_t) fn); \
-        retval->num_ordinals++; \
-        }
-
-#define END_NATIVE_REPLACEMENT_TABLE() \
-        return retval; \
-        \
-    loadnative_failed: \
-        if (retval) { \
-            free(retval->exported_ordinals); \
-            free(retval->exported_names); \
-            free(retval); \
-        } \
-        return NULL; \
-    }
+typedef LxModule *(*LxNativeReplacementEntryPoint)(LxLoaderState *state);
 
 #endif
 

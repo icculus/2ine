@@ -1,4 +1,6 @@
-#include "../lx_loader.h"
+#include "native.h"
+
+NATIVE_MODULE(kdbcalls);
 
 NATIVE_REPLACEMENT_TABLE("kbdcalls")
 END_NATIVE_REPLACEMENT_TABLE()

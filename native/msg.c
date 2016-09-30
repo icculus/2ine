@@ -1,4 +1,6 @@
-#include "../lx_loader.h"
+#include "native.h"
+
+NATIVE_MODULE(msg);
 
 static uint32 DosPutMessage(uint32 handle, uint32 msglen, const char *msg)
 {

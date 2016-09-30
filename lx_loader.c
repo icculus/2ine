@@ -12,8 +12,9 @@
 
 #include "lx_loader.h"
 
-static LxModule *GLoadedModules = NULL;
-static LxModule *GProgramModule = NULL;
+static LxLoaderState _GLoaderState;
+static LxLoaderState *GLoaderState = &_GLoaderState;
+
 
 // !!! FIXME: move this into an lx_common.c file.
 static int sanityCheckLxModule(uint8 **_exe, uint32 *_exelen)
@@ -73,6 +74,28 @@ static int sanityCheckLxModule(uint8 **_exe, uint32 *_exelen)
 
     return 1;
 } // sanityCheckLxModule
+
+static char *makeOS2Path(const char *fname)
+{
+    char *full = realpath(fname, NULL);
+    if (!full)
+        return NULL;
+
+    char *retval = (char *) malloc(strlen(full) + 3);
+    if (!retval)
+        return NULL;
+
+    retval[0] = 'C';
+    retval[1] = ':';
+    strcpy(retval + 2, full);
+    free(full);
+    for (char *ptr = retval + 2; *ptr; ptr++) {
+        if (*ptr == '/')
+            *ptr = '\\';
+    } // for
+
+    return retval;
+} // makeOS2Path
 
 /* this algorithm is from lxlite 138u. */
 static int decompressExePack2(uint8 *dst, const uint32 dstlen, const uint8 *src, const uint32 srclen)
@@ -243,7 +266,7 @@ static uint32 generateMissingTrampoline(const char *_module, const char *_entry)
     return (uint32) (size_t) trampoline;
 } // generateMissingTrampoline
 
-static __attribute__((noreturn)) void runLxModule(const LxModule *lxmod, const int argc, char **argv)
+static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int argc, char **argv)
 {
     // !!! FIXME: right now, we don't list any environment variables, because they probably don't make sense to drop in (even PATH uses a different separator on Unix).
     // !!! FIXME:  eventually, the environment table looks like this (double-null to terminate list):  var1=a\0var2=b\0var3=c\0\0
@@ -279,6 +302,9 @@ static __attribute__((noreturn)) void runLxModule(const LxModule *lxmod, const i
         *(ptr++) = '\0';
     } // for
     *(ptr++) = '\0';
+
+    lxmod->env = env;
+    lxmod->cmd = cmd;
 
     // ...and you pass it the pointer to argv0. This is (at least as far as the docs suggest) appended to the environment table.
     printf("jumping into LX land...! eip=0x%X esp=0x%X\n", (unsigned int) lxmod->eip, (unsigned int) lxmod->esp); fflush(stdout);
@@ -318,7 +344,7 @@ static __attribute__((noreturn)) void runLxModule(const LxModule *lxmod, const i
 static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
 {
     // ...and you pass it the pointer to argv0. This is (at least as far as the docs suggest) appended to the environment table.
-    printf("jumping into LX land to %s library...! eip=0x%X esp=0x%X\n", isTermination ? "terminate" : "initialize", (unsigned int) lxmod->eip, (unsigned int) GProgramModule->esp); fflush(stdout);
+    printf("jumping into LX land to %s library...! eip=0x%X esp=0x%X\n", isTermination ? "terminate" : "initialize", (unsigned int) lxmod->eip, (unsigned int) GLoaderState->main_module->esp); fflush(stdout);
 
     // !!! FIXME: need to set up OS/2 TIB and put it in FS register.
     __asm__ __volatile__ (
@@ -347,7 +373,7 @@ static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
         "popfl             \n\t"  // restore our original flags.
         "popal             \n\t"  // restore our original registers.
             : // no outputs
-            : "a" (isTermination), "S" (GProgramModule->esp), "D" (lxmod->eip)
+            : "a" (isTermination), "S" (GLoaderState->main_module->esp), "D" (lxmod->eip)
             : "memory"
     );
 
@@ -378,11 +404,11 @@ static void freeLxModule(LxModule *lxmod)
     if (lxmod->prev)
         lxmod->prev->next = lxmod->next;
 
-    if (lxmod == GLoadedModules)
-        GLoadedModules = lxmod->next;
+    if (lxmod == GLoaderState->loaded_modules)
+        GLoaderState->loaded_modules = lxmod->next;
 
-    if (GProgramModule == lxmod)
-        GProgramModule = NULL;
+    if (GLoaderState->main_module == lxmod)
+        GLoaderState->main_module = NULL;
     // !!! FIXME: mutex to here
 
     for (uint32 i = 0; i < lxmod->lx.num_import_mod_entries; i++)
@@ -613,7 +639,7 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
 } // fixupPage
 
 // !!! FIXME: break up this function.
-static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_depth)
+static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int dependency_tree_depth)
 {
     LxModule *retval = NULL;
     const uint8 *origexe = exe;
@@ -632,10 +658,10 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
 
     const int isDLL = (module_type == 0x8000);
 
-    if (isDLL && !GProgramModule) {
+    if (isDLL && !GLoaderState->main_module) {
         fprintf(stderr, "uhoh, need to load an .exe before a .dll!\n");
         goto loadlx_failed;
-    } else if (!isDLL && GProgramModule) {
+    } else if (!isDLL && GLoaderState->main_module) {
         fprintf(stderr, "uhoh, loading an .exe after already loading one!\n");
         goto loadlx_failed;
     } // if else if
@@ -669,7 +695,7 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
     } // if
 
     if (!isDLL) { // !!! FIXME: mutex?
-        GProgramModule = retval;
+        GLoaderState->main_module = retval;
     } // else if
 
     const char *modname = retval->name;
@@ -768,10 +794,12 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
 
     // !!! FIXME: esp==0 means something special for programs (and is ignored for library init).
     // !!! FIXME: "A zero value in this field indicates that the stack pointer is to be initialized to the highest address/offset in the object"
-    retval->esp = lx->esp;
-    if (lx->esp_object != 0) {  // !!! FIXME: ignore for libraries
-        const uint32 base = (uint32) ((size_t)retval->mmaps[lx->esp_object - 1].addr);
-        retval->esp += base;
+    if (!isDLL) {
+        retval->esp = lx->esp;
+        if (lx->esp_object != 0) {
+            const uint32 base = (uint32) ((size_t)retval->mmaps[lx->esp_object - 1].addr);
+            retval->esp += base;
+        } // if
     } // if
 
     // Set up our exports...
@@ -812,7 +840,7 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
                 for (uint8 i = 0; i < numentries; i++) {
                     entryptr++;
                     expord->ordinal = ordinal++;
-                    expord->addr = ((uint8 *) retval->mmaps[objidx].addr) + *((const uint16 *) entryptr);
+                    expord->addr = (uint32) (size_t) ((uint8 *) retval->mmaps[objidx].addr) + *((const uint16 *) entryptr);
                     expord++;
                     entryptr += 2;
                 } // for
@@ -824,7 +852,7 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
                 for (uint8 i = 0; i < numentries; i++) {
                     entryptr++;
                     expord->ordinal = ordinal++;
-                    expord->addr = ((uint8 *) retval->mmaps[objidx].addr) + *((const uint32 *) entryptr);
+                    expord->addr = (uint32) (size_t) ((uint8 *) retval->mmaps[objidx].addr) + *((const uint32 *) entryptr);
                     expord++;
                     entryptr += 4;
                 }
@@ -878,6 +906,14 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
             dst += lx->page_size;
         } // for
 
+        // !!! FIXME: hack to nop out some 16-bit code in emx.dll startup...
+        if ((i == 1) && (strcmp(modname, "EMX") == 0)) {
+            uint8 *ptr = ((uint8 *) retval->mmaps[1].addr) + 28596;
+            for (uint32 i = 0; i < 37; i++)
+                *(ptr++) = 0x90; // nop
+        }
+
+
         // Now set all the pages of this object to the proper final permissions...
         const int prot = ((obj->object_flags & 0x1) ? PROT_READ : 0) |
                          ((obj->object_flags & 0x2) ? PROT_WRITE : 0) |
@@ -894,13 +930,17 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
         } // if
     } // for
 
+    retval->os2path = makeOS2Path(fname);
+    if (!retval->os2path)
+        goto loadlx_failed;
+
     if (!isDLL) {
         retval->initialized = 1;
     } else {
         // call library init code...
         if (retval->eip) {
-            assert(GProgramModule != NULL);
-            assert(GProgramModule != retval);
+            assert(GLoaderState->main_module != NULL);
+            assert(GLoaderState->main_module != retval);
             runLxLibraryInit(retval);
         } // if
 
@@ -908,11 +948,11 @@ static LxModule *loadLxModule(uint8 *exe, uint32 exelen, int dependency_tree_dep
 
         // module is ready to use, put it in the loaded list.
         // !!! FIXME: mutex this
-        if (GLoadedModules) {
-            retval->next = GLoadedModules;
-            GLoadedModules->prev = retval;
+        if (GLoaderState->loaded_modules) {
+            retval->next = GLoaderState->loaded_modules;
+            GLoaderState->loaded_modules->prev = retval;
         } // if
-        GLoadedModules = retval;
+        GLoaderState->loaded_modules = retval;
     } // if
 
     return retval;
@@ -943,7 +983,7 @@ static LxModule *loadLxModuleByPathInternal(const char *fname, const int depende
 
     #undef LOADFAIL
 
-    LxModule *retval = loadLxModule(module, modulelen, dependency_tree_depth);
+    LxModule *retval = loadLxModule(fname, module, modulelen, dependency_tree_depth);
     free(module);
     return retval;
 
@@ -962,30 +1002,43 @@ static inline LxModule *loadLxModuleByPath(const char *fname)
 
 static LxModule *loadNativeReplacement(const char *fname)
 {
+    LxModule *retval = NULL;
+    void *lib = NULL;
+    LxNativeReplacementEntryPoint fn = NULL;
+    char *os2path = makeOS2Path(fname);
+
+    if (!os2path)
+        goto loadnative_failed;
+
     // !!! FIXME: mutex this.
-    void *lib = dlopen(fname, RTLD_LOCAL | RTLD_NOW);
+    lib = dlopen(fname, RTLD_LOCAL | RTLD_NOW);
     if (lib == NULL)
-        return NULL;
+        goto loadnative_failed;
 
-    LxNativeReplacementEntryPoint fn = (LxNativeReplacementEntryPoint) dlsym(lib, "loadNativeLxModule");
-    if (!fn) {
-        dlclose(lib);
-        return NULL;
-    } // if
+    fn = (LxNativeReplacementEntryPoint) dlsym(lib, "loadNativeLxModule");
+    if (!fn)
+        goto loadnative_failed;
 
-    LxModule *retval = fn();
-    if (retval) {
-        printf("Loaded native replacement library '%s' (%u exports).\n", fname, (unsigned int) retval->num_ordinals);
-        retval->nativelib = lib;
-    } // if
+    retval = fn(GLoaderState);
+    if (!retval)
+        goto loadnative_failed;
+
+    printf("Loaded native replacement library '%s' (%u exports).\n", fname, (unsigned int) retval->num_ordinals);
+    retval->nativelib = lib;
+    retval->os2path = os2path;
 
     return retval;
+
+loadnative_failed:
+    if (lib) dlclose(lib);
+    free(os2path);
+    return NULL;
 } // loadNativeReplacement
 
 static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int dependency_tree_depth)
 {
     // !!! FIXME: mutex this
-    for (LxModule *i = GLoadedModules; i != NULL; i = i->next) {
+    for (LxModule *i = GLoaderState->loaded_modules; i != NULL; i = i->next) {
         if (strcasecmp(i->name, modname) == 0) {
             i->refcount++;
             printf("ref'd module '%s' to %u\n", i->name, (unsigned int) i->refcount);

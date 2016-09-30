@@ -16,12 +16,13 @@ set -e
 gcc -m32 -std=c99 -Wall -O0 -ggdb3 -fPIC -shared -Wl,-soname,msg.so -o native/msg.so native/msg.c
 gcc -m32 -std=c99 -Wall -O0 -ggdb3 -fPIC -shared -Wl,-soname,doscalls.so.so -o native/doscalls.so native/doscalls.c
 gcc -m32 -std=c99 -Wall -O0 -ggdb3 -fPIC -shared -Wl,-soname,nls.so -o native/nls.so native/nls.c
-gcc -m32 -std=c99 -Wall -O0 -ggdb3 -fPIC -shared -Wl,-soname,quecalls.so -o native/queecalls.so native/quecalls.c
+gcc -m32 -std=c99 -Wall -O0 -ggdb3 -fPIC -shared -Wl,-soname,quecalls.so -o native/quecalls.so native/quecalls.c
 gcc -m32 -std=c99 -Wall -O0 -ggdb3 -fPIC -shared -Wl,-soname,viocalls.so -o native/viocalls.so native/viocalls.c
 gcc -m32 -std=c99 -Wall -O0 -ggdb3 -fPIC -shared -Wl,-soname,kdbcalls.so -o native/kbdcalls.so native/kbdcalls.c
 gcc -m32 -std=c99 -Wall -O0 -ggdb3 -fPIC -shared -Wl,-soname,sesmgr.so -o native/sesmgr.so native/sesmgr.c
 
 gcc -std=c99 -Wall -O0 -ggdb3 -o lx_dump lx_dump.c
 gcc -m32 -std=c99 -Wall -O0 -ggdb3 -o lx_loader lx_loader.c -ldl
-./lx_dump tests/hello.exe
-./lx_loader tests/hello.exe
+#./lx_dump tests/hello.exe
+./lx_loader tests/helloc.exe
+
