@@ -1,4 +1,5 @@
-#include "native.h"
+#include "os2native.h"
+#include "nls.h"
 
 NATIVE_MODULE(nls);
 

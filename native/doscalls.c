@@ -1,89 +1,29 @@
 #define _POSIX_C_SOURCE 199309
-#include "native.h"
+#include <unistd.h>
+#include <limits.h>
 #include <time.h>
+#include <sys/types.h>
 #include <sys/sysinfo.h>
 #include <sys/time.h>
 
+#include "os2native.h"
+#include "doscalls.h"
+
 NATIVE_MODULE(doscalls);
-
-typedef LxModule *HMODULE;
-typedef uint32 HFILE;
-typedef uint32 HEV;
-typedef uint32 HMTX;
-
-typedef enum
-{
-    QSV_MAX_PATH_LENGTH = 1,
-    QSV_MAX_TEXT_SESSIONS,
-    QSV_MAX_PM_SESSIONS,
-    QSV_MAX_VDM_SESSIONS,
-    QSV_BOOT_DRIVE,
-    QSV_DYN_PRI_VARIATION,
-    QSV_MAX_WAIT,
-    QSV_MIN_SLICE,
-    QSV_MAX_SLICE,
-    QSV_PAGE_SIZE,
-    QSV_VERSION_MAJOR,
-    QSV_VERSION_MINOR,
-    QSV_VERSION_REVISION,
-    QSV_MS_COUNT,
-    QSV_TIME_LOW,
-    QSV_TIME_HIGH,
-    QSV_TOTPHYSMEM,
-    QSV_TOTRESMEM,
-    QSV_TOTAVAILMEM,
-    QSV_MAXPRMEM,
-    QSV_MAXSHMEM,
-    QSV_TIMER_INTERVAL,
-    QSV_MAX_COMP_LENGTH,
-    QSV_FOREGROUND_FS_SESSION,
-    QSV_FOREGROUND_PROCESS
-} QuerySysInfoVariable;
-
-typedef struct TIB2
-{
-    uint32 tib2_ultid;
-    uint32 tib2_ulpri;
-    uint32 tib2_version;
-    uint16 tib2_usMCCount;
-    uint16 tib2_fMCForceFlag;
-} TIB2;
-
-typedef struct TIB
-{
-    void *tib_pexchain;
-    void *tib_pstack;
-    void *tib_pstacklimit;
-    TIB2 *tib_ptib2;
-    uint32 tib_version;
-    uint32 tib_ordinal;
-} TIB;
-
-typedef struct PIB
-{
-    uint32 pib_ulpid;
-    uint32 pib_ulppid;
-    HMODULE pib_hmte;
-    char *pib_pchcmd;
-    char *pib_pchenv;
-    uint32 pib_flstatus;
-    uint32 pib_ultype;
-} PIB;
-
-typedef void(*ExitListFn)(uint32 why);
 
 typedef struct ExitListItem
 {
-    ExitListFn fn;
+    PFNEXITLIST fn;
     uint32 priority;
     struct ExitListItem *next;
 } ExitListItem;
 
 static ExitListItem *GExitList = NULL;
 
-static APIRET DosGetInfoBlocks(TIB **pptib, PIB **pppib)
+APIRET DosGetInfoBlocks(PTIB *pptib, PPIB *pppib)
 {
-printf("DosGetInfoBlocks\n");
+    TRACE_NATIVE("DosGetInfoBlocks(%p, %p)", pptib, pppib);
+
     // !!! FIXME: this is seriously incomplete.
     if (pptib != NULL) {
         static __thread TIB tib;
@@ -113,12 +53,13 @@ printf("DosGetInfoBlocks\n");
     return 0;
 } // DosGetInfoBlocks
 
-static APIRET DosQuerySysInfo(uint32 first, uint32 last, void *_buf, uint32 buflen)
+APIRET DosQuerySysInfo(ULONG first, ULONG last, PVOID _buf, ULONG buflen)
 {
+    TRACE_NATIVE("DosQuerySysInfo(%u, %u, %p, %u)", (uint) first, (uint) last, _buf, (uint) buflen);
+
     uint32 *buf = (uint32 *) _buf;
-printf("DosQuerySysInfo(%u, %u, %p, %u);\n", (unsigned int) first, (unsigned int) last, buf, (unsigned int) buflen);
-    if (last < first) return 87;  // ERROR_INVALID_PARAMETER
-    if ( (buflen / sizeof (uint32)) < ((last - first) + 1) ) return 111; // ERROR_BUFFER_OVERFLOW
+    if (last < first) return ERROR_INVALID_PARAMETER;
+    if ( (buflen / sizeof (uint32)) < ((last - first) + 1) ) return ERROR_BUFFER_OVERFLOW;
     for (uint32 varid = first; varid <= last; varid++) {
         switch (varid) {
             case QSV_MAX_PATH_LENGTH: *(buf++) = PATH_MAX; break;
@@ -131,6 +72,7 @@ printf("DosQuerySysInfo(%u, %u, %p, %u);\n", (unsigned int) first, (unsigned int
             case QSV_MIN_SLICE: *(buf++) = 1; break;
             case QSV_MAX_SLICE: *(buf++) = 10; break;
             case QSV_PAGE_SIZE: *(buf++) = 4096; break;
+            // !!! FIXME: change the version number in some way so apps can know this isn't actually OS/2.
             case QSV_VERSION_MAJOR: *(buf++) = 20; break;   // OS/2 Warp 4.0
             case QSV_VERSION_MINOR: *(buf++) = 40; break;   // OS/2 Warp 4.0
             case QSV_VERSION_REVISION: *(buf++) = 0; break; // OS/2 Warp 4.0
@@ -183,52 +125,55 @@ printf("DosQuerySysInfo(%u, %u, %p, %u);\n", (unsigned int) first, (unsigned int
             case QSV_FOREGROUND_FS_SESSION: *(buf++) = 1; break;  // !!! FIXME
             case QSV_FOREGROUND_PROCESS: *(buf++) = 1; break;  // !!! FIXME
 
-            default: return 87;  // ERROR_INVALID_PARAMETER
+            default: return ERROR_INVALID_PARAMETER;
         } // switch
     } // for
 
-    return 0;  // NO_ERROR
+    return NO_ERROR;
 } // DosQuerySysInfo
 
 
-static APIRET DosQueryModuleName(HMODULE hmod, uint32 buflen, char *buf)
+APIRET DosQueryModuleName(HMODULE hmod, ULONG buflen, PCHAR buf)
 {
+    TRACE_NATIVE("DosQueryModuleName(%u, %u, %p)", (uint) hmod, (uint) buflen, buf);
+
     const LxModule *lxmod = (LxModule *) hmod;
-printf("DosQueryModuleName ('%s')\n", lxmod->os2path);
     // !!! FIXME: error 6 ERROR_INVALID_HANDLE
     if (strlen(lxmod->os2path) <= buflen)
-        return 24;  // ERROR_BAD_LENGTH
+        return ERROR_BAD_LENGTH;
     strcpy(buf, lxmod->os2path);
-    return 0;  // NO_ERROR
+    return NO_ERROR;
 } // DosQueryModuleName
 
-static APIRET DosScanEnv(char *name, char **outval)
+
+APIRET DosScanEnv(PSZ name, PSZ *outval)
 {
-printf("DosScanEnv('%s')\n", name);
+    TRACE_NATIVE("DosScanEnv('%s', %p)", name, outval);
+
     char *env = GLoaderState->main_module->env;
     const size_t len = strlen(name);
     while (*env) {
         if ((strncmp(env, name, len) == 0) && (env[len] == '=')) {
             *outval = env + len + 1;
-            return 0;  // NO_ERROR
+            return NO_ERROR;
         } // if
         env += strlen(env) + 1;
     } // while
 
-    return 203;  // ERROR_ENVVAR_NOT_FOUND
+    return ERROR_ENVVAR_NOT_FOUND;
 } // DosScanEnv
 
-static APIRET DosWrite(HFILE h, void *buf, uint32 buflen, uint32 *actual)
+APIRET DosWrite(HFILE h, PVOID buf, ULONG buflen, PULONG actual)
 {
+    TRACE_NATIVE("DosWrite(%u, %p, %u, %p)", (uint) h, buf, (uint) buflen, actual);
     // !!! FIXME: writing to a terminal should convert CR/LF to LF.
-printf("DosWrite(%u, %p, %u, %p)\n", (unsigned int) h, buf, (unsigned int) buflen, actual);
     // OS/2 appears to use 0, 1, 2 for stdin, stdout, stderr, like Unix! Hooray!
     const int rc = write((int) h, buf, buflen);
     if (rc < 0)
-        return 112;  // ERROR_DISK_FULL  !!! FIXME: map these errors.
+        return ERROR_DISK_FULL;  // !!! FIXME: map these errors.
 
     *actual = (uint32) rc;
-    return 0;  // NO_ERROR
+    return NO_ERROR;
 } // DosWrite
 
 static void runDosExitList(const uint32 why)
@@ -237,7 +182,7 @@ static void runDosExitList(const uint32 why)
     for (ExitListItem *item = GExitList; item; item = next) {
         // don't run any of these more than once:
         //  http://www.verycomputer.com/3_c1f6e02c06ed108e_1.htm
-        ExitListFn fn = item->fn;
+        PFNEXITLIST fn = item->fn;
         next = item->next;
         GExitList = next;
         free(item);
@@ -245,18 +190,19 @@ static void runDosExitList(const uint32 why)
     } // for
 } // runDosExitList
 
-static void DosExit(uint32 action, uint32 exitcode)
+VOID DosExit(ULONG action, ULONG exitcode)
 {
-printf("DosExit(%u, %u)\n", (unsigned int) action, (unsigned int) exitcode);
+    TRACE_NATIVE("DosExit(%u, %u)", (uint) action, (uint) exitcode);
+
     // !!! FIXME: what does a value other than 0 or 1 do here?
-    if (action == 0) { // EXIT_THREAD
+    if (action == EXIT_THREAD) {
         // !!! FIXME: terminate thread. If last thread: terminate process.
         fprintf(stderr, "FIXME: DosExit(0) should terminate thread, not process.\n");
         fflush(stderr);
     } // if
 
     // terminate the process.
-    runDosExitList(0);  // 0 == TC_EXIT
+    runDosExitList(TC_EXIT);
 
     // !!! FIXME: finalize OS/2 DLLs before killing the process?
 
@@ -266,11 +212,12 @@ printf("DosExit(%u, %u)\n", (unsigned int) action, (unsigned int) exitcode);
     exit((int) (exitcode & 0xFFFF));
 } // DosExit
 
-static APIRET DosExitList(uint32 ordercode, ExitListFn fn)
+APIRET DosExitList(ULONG ordercode, PFNEXITLIST fn)
 {
-printf("DosExitList(%u, %p)\n", (unsigned int) ordercode, fn);
+    TRACE_NATIVE("DosExitList(%u, %p)", (uint) ordercode, fn);
+
     if (fn == NULL)
-        return 1;  // ERROR_INVALID_FUNCTION
+        return ERROR_INVALID_FUNCTION;
 
     const uint8 cmd = ordercode & 0xFF;
     const uint8 arg = (ordercode >> 8) & 0xFF;
@@ -279,13 +226,13 @@ printf("DosExitList(%u, %p)\n", (unsigned int) ordercode, fn);
 
     // !!! FIXME: docs say this is illegal, but have to check what OS/2 actually does here.
     if ((cmd != 1) && (arg != 0))
-        return 13;  // ERROR_INVALID_DATA
+        return ERROR_INVALID_DATA;
 
     switch (cmd) {
-        case 1: {  // EXLST_ADD
+        case EXLST_ADD: {
             ExitListItem *newitem = (ExitListItem *) malloc(sizeof (ExitListItem));
             if (!newitem)
-                return 8;  // ERROR_NOT_ENOUGH_MEMORY
+                return ERROR_NOT_ENOUGH_MEMORY;
             for (item = GExitList; item; item = item->next) {
                 if (item->priority >= ((uint32) arg))
                     break;
@@ -298,10 +245,10 @@ printf("DosExitList(%u, %p)\n", (unsigned int) ordercode, fn);
                 newitem->next = GExitList;
                 GExitList = newitem;
             } // else
-            return 0;  // NO_ERROR
+            return NO_ERROR;
         } // case
 
-        case 2: {  // EXLST_REMOVE
+        case EXLST_REMOVE: {
             for (item = GExitList; item; item = item->next) {
                 if (item->fn == fn) {
                     if (prev)
@@ -309,41 +256,41 @@ printf("DosExitList(%u, %p)\n", (unsigned int) ordercode, fn);
                     else
                         GExitList = item->next;
                     free(item);
-                    return 0;  // NO_ERROR
+                    return NO_ERROR;
                 } // if
                 prev = item;
             } // for
-            return 1;  // ERROR_INVALID_FUNCTION  !!! FIXME: yeah?
+            return ERROR_INVALID_FUNCTION;  // !!! FIXME: yeah?
         } // case
 
-        case 3:  // EXLST_EXIT
-            return 0;  // NO_ERROR ... just treat this as a no-op, I guess...?
+        case EXLST_EXIT:
+            return NO_ERROR;  // ... just treat this as a no-op, I guess...?
 
-        default: return 13;  // ERROR_INVALID_DATA
+        default: return ERROR_INVALID_DATA;
     } // switch
 
-    return 0;  // NO_ERROR
+    return NO_ERROR;
 } // DosExitList
 
-static APIRET DosCreateEventSem(char *name, HEV *phev, uint32 attr, uint32 state)
+APIRET DosCreateEventSem(PSZ name, PHEV phev, ULONG attr, BOOL32 state)
 {
-    printf("DosCreateEventSem('%s', %p, %u, %u);\n", name, phev, (unsigned int) attr, (unsigned int) state);
+    TRACE_NATIVE("DosCreateEventSem('%s', %p, %u, %u)", name, phev, (uint) attr, (uint) state);
     // !!! FIXME: write me
-    return 0;  // NO_ERROR
+    return NO_ERROR;
 } // DosCreateEventSem
 
-static APIRET DosCreateMutexSem(char *name, HMTX *phmtx, uint32 attr, uint32 state)
+APIRET DosCreateMutexSem(PSZ name, PHMTX phmtx, ULONG attr, BOOL32 state)
 {
-    printf("DosCreateMutexSem('%s', %p, %u, %u);\n", name, phmtx, (unsigned int) attr, (unsigned int) state);
+    TRACE_NATIVE("DosCreateMutexSem('%s', %p, %u, %u)", name, phmtx, (uint) attr, (uint) state);
     // !!! FIXME: write me
-    return 0;  // NO_ERROR
+    return NO_ERROR;
 } // DosCreateMutexSem
 
 // !!! FIXME: this is obviously not correct.
-static APIRET DosSetExceptionHandler(void *rec)
+APIRET DosSetExceptionHandler(PEXCEPTIONREGISTRATIONRECORD rec)
 {
-    printf("DosSetExceptionHandler(%p);\n", rec);
-    return 0;  // NO_ERROR
+    TRACE_NATIVE("DosSetExceptionHandler(%p)", rec);
+    return NO_ERROR;
 } // DosSetExceptionHandler
 
 static uint32 DosFlatToSel(void)
@@ -351,20 +298,21 @@ static uint32 DosFlatToSel(void)
     // this actually passes the arg in eax instead of the stack.
     uint32 eax = 0;
     __asm__ __volatile__ ("" : "=a" (eax));
-    printf("DosFlatToSel(%p);\n", (void *) (size_t) eax);
+    TRACE_NATIVE("DosFlatToSel(%p)", (void *) (size_t) eax);
     return 0x12345678;  // !!! FIXME
 } // DosFlatToSel
 
-static APIRET DosSetSignalExceptionFocus(uint32 flag, uint32 *pulTimes)
+APIRET DosSetSignalExceptionFocus(BOOL32 flag, PULONG pulTimes)
 {
-    printf("DosSetSignalExceptionFocus(%u, %p);\n", (unsigned int) flag, pulTimes);
+    TRACE_NATIVE("DosSetSignalExceptionFocus(%u, %p)", (uint) flag, pulTimes);
+
     if (flag == 0) {
         if (GLoaderState->main_module->signal_exception_focus_count == 0)
-            return 300;  // ERROR_ALREADY_RESET
+            return ERROR_ALREADY_RESET;
         GLoaderState->main_module->signal_exception_focus_count--;
     } else if (flag == 1) {
         if (GLoaderState->main_module->signal_exception_focus_count == 0xFFFFFFFF)
-            return 650;  // ERROR_NESTING_TOO_DEEP
+            return ERROR_NESTING_TOO_DEEP;
         GLoaderState->main_module->signal_exception_focus_count++;
     } else {
         // !!! FIXME: does OS/2 do something if flag != 0 or 1?
@@ -375,7 +323,7 @@ static APIRET DosSetSignalExceptionFocus(uint32 flag, uint32 *pulTimes)
 
     // !!! FIXME: I guess enable/disable SIGINT handler here?
 
-    return 0;  // NO_ERROR
+    return NO_ERROR;
 } // DosSetSignalExceptionFocus
 
 

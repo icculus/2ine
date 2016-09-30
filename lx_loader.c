@@ -24,7 +24,7 @@ static int sanityCheckLxModule(uint8 **_exe, uint32 *_exelen)
         return 0;
     }
     const uint32 header_offset = *((uint32 *) (*_exe + 0x3C));
-    //printf("header offset is %u\n", (unsigned int) header_offset);
+    //printf("header offset is %u\n", (uint) header_offset);
     if ((header_offset + sizeof (LxHeader)) >= *_exelen) {
         fprintf(stderr, "not an OS/2 LX module\n");
         return 0;
@@ -46,22 +46,22 @@ static int sanityCheckLxModule(uint8 **_exe, uint32 *_exelen)
     }
 
     if (lx->lx_version != 0) {
-        fprintf(stderr, "Program is unknown LX module version (%u)\n", (unsigned int) lx->lx_version);
+        fprintf(stderr, "Program is unknown LX module version (%u)\n", (uint) lx->lx_version);
         return 0;
     }
 
     if (lx->cpu_type > 3) { // 1==286, 2==386, 3==486
-        fprintf(stderr, "Program needs unknown CPU type (%u)\n", (unsigned int) lx->cpu_type);
+        fprintf(stderr, "Program needs unknown CPU type (%u)\n", (uint) lx->cpu_type);
         return 0;
     }
 
     if (lx->os_type != 1) { // 1==OS/2, others: dos4, windows, win386, unknown.
-        fprintf(stderr, "Program needs unknown OS type (%u)\n", (unsigned int) lx->os_type);
+        fprintf(stderr, "Program needs unknown OS type (%u)\n", (uint) lx->os_type);
         return 0;
     }
 
     if (lx->page_size != 4096) {
-        fprintf(stderr, "Program page size isn't 4096 (%u)\n", (unsigned int) lx->page_size);
+        fprintf(stderr, "Program page size isn't 4096 (%u)\n", (uint) lx->page_size);
         return 0;
     }
 
@@ -307,7 +307,7 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
     lxmod->cmd = cmd;
 
     // ...and you pass it the pointer to argv0. This is (at least as far as the docs suggest) appended to the environment table.
-    printf("jumping into LX land...! eip=0x%X esp=0x%X\n", (unsigned int) lxmod->eip, (unsigned int) lxmod->esp); fflush(stdout);
+    printf("jumping into LX land...! eip=0x%X esp=0x%X\n", (uint) lxmod->eip, (uint) lxmod->esp); fflush(stdout);
 
     // !!! FIXME: need to set up OS/2 TIB and put it in FS register.
     __asm__ __volatile__ (
@@ -344,7 +344,7 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
 static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
 {
     // ...and you pass it the pointer to argv0. This is (at least as far as the docs suggest) appended to the environment table.
-    printf("jumping into LX land to %s library...! eip=0x%X esp=0x%X\n", isTermination ? "terminate" : "initialize", (unsigned int) lxmod->eip, (unsigned int) GLoaderState->main_module->esp); fflush(stdout);
+    printf("jumping into LX land to %s library...! eip=0x%X esp=0x%X\n", isTermination ? "terminate" : "initialize", (uint) lxmod->eip, (uint) GLoaderState->main_module->esp); fflush(stdout);
 
     // !!! FIXME: need to set up OS/2 TIB and put it in FS register.
     __asm__ __volatile__ (
@@ -391,7 +391,7 @@ static void freeLxModule(LxModule *lxmod)
 
     // !!! FIXME: mutex from here
     lxmod->refcount--;
-    printf("unref'd module '%s' to %u\n", lxmod->name, (unsigned int) lxmod->refcount);
+    printf("unref'd module '%s' to %u\n", lxmod->name, (uint) lxmod->refcount);
     if (lxmod->refcount > 0)
         return;  // something is still using it.
 
@@ -434,7 +434,7 @@ static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int
 
 static uint32 getModuleProcAddrByOrdinal(const LxModule *module, const uint32 ordinal)
 {
-    fprintf(stderr, "lookup module == '%s', ordinal == %u\n", module->name, (unsigned int) ordinal);
+    printf("lookup module == '%s', ordinal == %u\n", module->name, (uint) ordinal);
 
     const LxExportedOrdinal *expord = module->exported_ordinals;
     for (uint32 i = 0; i < module->num_ordinals; i++, expord++) {
@@ -444,7 +444,7 @@ static uint32 getModuleProcAddrByOrdinal(const LxModule *module, const uint32 or
 
     #if 1
     char entry[128];
-    snprintf(entry, sizeof (entry), "ORDINAL_%u", (unsigned int) ordinal);
+    snprintf(entry, sizeof (entry), "ORDINAL_%u", (uint) ordinal);
     return generateMissingTrampoline(module->name, entry);
     #else
     return 0;
@@ -454,7 +454,7 @@ static uint32 getModuleProcAddrByOrdinal(const LxModule *module, const uint32 or
 #if 0
 static uint32 getModuleProcAddrByName(const LxModule *module, const char *name)
 {
-    fprintf(stderr, "lookup module == '%s', name == '%s'\n", module->name, name);
+    printf("lookup module == '%s', name == '%s'\n", module->name, name);
 
     const LxExportedName *expname = module->exported_names;
     for (uint32 i = 0; i < module->num_names; i++, expname++) {
@@ -474,9 +474,9 @@ static void doFixup(uint8 *page, const sint16 offset, const uint32 finalval, con
 {
     #if 1
     if (finalsize == 6) {
-        printf("fixing up %p to 0x%X:0x%X (6 bytes)...\n", page + offset, (unsigned int) finalval2, (unsigned int) finalval);
+        printf("fixing up %p to 0x%X:0x%X (6 bytes)...\n", page + offset, (uint) finalval2, (uint) finalval);
     } else {
-        printf("fixing up %p to 0x%X (%u bytes)...\n", page + offset, (unsigned int) finalval, (unsigned int) finalsize);
+        printf("fixing up %p to 0x%X (%u bytes)...\n", page + offset, (uint) finalval, (uint) finalsize);
     } // else
     fflush(stdout);
     #endif
@@ -493,7 +493,7 @@ static void doFixup(uint8 *page, const sint16 offset, const uint32 finalval, con
             break;
         } // case
         default:
-            fprintf(stderr, "BUG! Unexpected fixup final size of %u\n", (unsigned int) finalsize);
+            fprintf(stderr, "BUG! Unexpected fixup final size of %u\n", (uint) finalsize);
             exit(1);
     } // switch
 } // doFixup
@@ -501,13 +501,15 @@ static void doFixup(uint8 *page, const sint16 offset, const uint32 finalval, con
 static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntry *obj, const uint32 pagenum, uint8 *page)
 {
     const LxHeader *lx = &lxmod->lx;
+const LxObjectTableEntry *origobj = ((const LxObjectTableEntry *) (exe + lx->object_table_offset));
     const uint32 *fixuppage = (((const uint32 *) (exe + lx->fixup_page_table_offset)) + ((obj->page_table_index - 1) + pagenum));
     const uint32 fixupoffset = *fixuppage;
     const uint32 fixuplen = fixuppage[1] - fixuppage[0];
     const uint8 *fixup = (exe + lx->fixup_record_table_offset) + fixupoffset;
     const uint8 *fixupend = fixup + fixuplen;
-
+    int record = 0;
     while (fixup < fixupend) {
+record++; printf("FIXUP obj #%u page #%u record #: %d\n", (uint) (obj - origobj), (uint) pagenum, record);
         const uint8 srctype = *(fixup++);
         const uint8 fixupflags = *(fixup++);
         uint8 srclist_count = 0;
@@ -586,7 +588,7 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
                 if (moduleid == 0) {
                     fprintf(stderr, "uhoh, looking for module ordinal 0, which is illegal.\n");
                 } else if (moduleid > lx->num_import_mod_entries) {
-                    fprintf(stderr, "uhoh, looking for module ordinal %u, but only %u available.\n", (unsigned int) moduleid, (unsigned int) lx->num_import_mod_entries);
+                    fprintf(stderr, "uhoh, looking for module ordinal %u, but only %u available.\n", (uint) moduleid, (uint) lx->num_import_mod_entries);
                 } else {
                     finalval = getModuleProcAddrByOrdinal(lxmod->dependencies[moduleid-1], importid);
                 } // else
@@ -719,14 +721,16 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
         if ((vsize % lx->page_size) != 0)
              vsize += lx->page_size - (vsize % lx->page_size);
 
-        const int mmapflags = MAP_ANON | MAP_PRIVATE | (isDLL ? 0 : MAP_FIXED);
+        const int mmapflags = MAP_POPULATE | MAP_ANON | MAP_PRIVATE | (isDLL ? 0 : MAP_FIXED);
         void *base = isDLL ? NULL : (void *) ((size_t) obj->reloc_base_addr);
         void *mmapaddr = mmap(base, vsize, PROT_READ|PROT_WRITE, mmapflags, -1, 0);
         // we'll mprotect() these pages to the proper permissions later.
 
+        printf("mmap(%p, %u, RW-, ANON|PRIVATE%s, -1, 0) == %p\n", base, (uint) vsize, isDLL ? "" : "|FIXED", mmapaddr);
+
         if (mmapaddr == ((void *) MAP_FAILED)) {
             fprintf(stderr, "mmap(%p, %u, RW-, ANON|PRIVATE%s, -1, 0) failed (%d): %s\n",
-                    base, (unsigned int) vsize, isDLL ? "" : "|FIXED", errno, strerror(errno));
+                    base, (uint) vsize, isDLL ? "" : "|FIXED", errno, strerror(errno));
             goto loadlx_failed;
         } // if
 
@@ -769,7 +773,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
 
                 case 0x08: // !!! FIXME: this is listed in lxlite, presumably this is exepack3 or something. Maybe this was new to Warp4, like exepack2 was new to Warp3. Pull this algorithm in from lxlite later.
                 default:
-                    fprintf(stderr, "Don't know how to load an object page of type %u!\n", (unsigned int) objpage->flags);
+                    fprintf(stderr, "Don't know how to load an object page of type %u!\n", (uint) objpage->flags);
                     goto loadlx_failed;
             } // switch
 
@@ -864,7 +868,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
                 goto loadlx_failed;
 
             default:
-                fprintf(stderr, "UNKNOWN ENTRY TYPE (%u)\n\n", (unsigned int) bundletype);
+                fprintf(stderr, "UNKNOWN ENTRY TYPE (%u)\n\n", (uint) bundletype);
                 goto loadlx_failed;
         } // switch
     } // while
@@ -879,7 +883,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
     for (uint32 i = 0; i < lx->num_import_mod_entries; i++) {
         const uint8 namelen = *(import_modules_table++);
         if (namelen > 127) {
-            fprintf(stderr, "Import module %u name is > 127 chars (%u). Corrupt file or bug!\n", (unsigned int) (i + 1), (unsigned int) namelen);
+            fprintf(stderr, "Import module %u name is > 127 chars (%u). Corrupt file or bug!\n", (uint) (i + 1), (uint) namelen);
             goto loadlx_failed;
         }
         char name[128];
@@ -921,7 +925,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
 
         if (mprotect(retval->mmaps[i].addr, retval->mmaps[i].size, prot) == -1) {
             fprintf(stderr, "mprotect(%p, %u, %s%s%s, ANON|PRIVATE|FIXED, -1, 0) failed (%d): %s\n",
-                    retval->mmaps[i].addr, (unsigned int) retval->mmaps[i].size,
+                    retval->mmaps[i].addr, (uint) retval->mmaps[i].size,
                     (prot&PROT_READ) ? "R" : "-",
                     (prot&PROT_WRITE) ? "W" : "-",
                     (prot&PROT_EXEC) ? "X" : "-",
@@ -1023,7 +1027,7 @@ static LxModule *loadNativeReplacement(const char *fname)
     if (!retval)
         goto loadnative_failed;
 
-    printf("Loaded native replacement library '%s' (%u exports).\n", fname, (unsigned int) retval->num_ordinals);
+    printf("Loaded native replacement library '%s' (%u exports).\n", fname, (uint) retval->num_ordinals);
     retval->nativelib = lib;
     retval->os2path = os2path;
 
@@ -1041,7 +1045,7 @@ static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int
     for (LxModule *i = GLoaderState->loaded_modules; i != NULL; i = i->next) {
         if (strcasecmp(i->name, modname) == 0) {
             i->refcount++;
-            printf("ref'd module '%s' to %u\n", i->name, (unsigned int) i->refcount);
+            printf("ref'd module '%s' to %u\n", i->name, (uint) i->refcount);
             return i;
         } // if
     } // for
@@ -1072,7 +1076,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    const LxModule *lxmod = loadLxModuleByPath(argv[1]);
+    LxModule *lxmod = loadLxModuleByPath(argv[1]);
     if (lxmod) {
         argc--;
         argv++;

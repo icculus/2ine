@@ -1,12 +1,13 @@
-#include "native.h"
+#include <unistd.h>
+
+#include "os2native.h"
+#include "msg.h"
 
 NATIVE_MODULE(msg);
 
-static uint32 DosPutMessage(uint32 handle, uint32 msglen, const char *msg)
+APIRET DosPutMessage(HFILE handle, ULONG msglen, PCHAR msg)
 {
-    // !!! FIXME: this isn't right, but good enough for now.
-    fwrite(msg, msglen, 1, stdout);
-    fflush(stdout);
+    write(handle, msg, msglen);
     return 0;
 } // DosPutMessage
 

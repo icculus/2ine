@@ -16,6 +16,8 @@ typedef int8_t sint8;
 typedef int16_t sint16;
 typedef int32_t sint32;
 
+typedef unsigned int uint;
+
 #pragma pack(push, 1)
 typedef struct LxHeader
 {

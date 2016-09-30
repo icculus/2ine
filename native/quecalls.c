@@ -1,4 +1,5 @@
-#include "native.h"
+#include "os2native.h"
+#include "quecalls.h"
 
 NATIVE_MODULE(quecalls);
 

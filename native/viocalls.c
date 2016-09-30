@@ -1,4 +1,5 @@
-#include "native.h"
+#include "os2native.h"
+#include "viocalls.h"
 
 NATIVE_MODULE(viocalls);
 
