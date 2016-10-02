@@ -3,17 +3,15 @@
 #include "os2native.h"
 #include "msg.h"
 
-NATIVE_MODULE(msg);
-
 APIRET DosPutMessage(HFILE handle, ULONG msglen, PCHAR msg)
 {
     write(handle, msg, msglen);
     return 0;
 } // DosPutMessage
 
-NATIVE_REPLACEMENT_TABLE("msg")
-    NATIVE_REPLACEMENT(DosPutMessage, 5)
-END_NATIVE_REPLACEMENT_TABLE()
+LX_NATIVE_MODULE_INIT()
+    LX_NATIVE_EXPORT(DosPutMessage, 5)
+LX_NATIVE_MODULE_INIT_END()
 
 // end of msg.c ...
 

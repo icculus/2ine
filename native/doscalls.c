@@ -5,11 +5,12 @@
 #include <sys/types.h>
 #include <sys/sysinfo.h>
 #include <sys/time.h>
+#include <sys/resource.h>
 
 #include "os2native.h"
 #include "doscalls.h"
 
-NATIVE_MODULE(doscalls);
+static LxLoaderState *GLoaderState = NULL;
 
 typedef struct ExitListItem
 {
@@ -19,6 +20,43 @@ typedef struct ExitListItem
 } ExitListItem;
 
 static ExitListItem *GExitList = NULL;
+
+static int *HFiles = NULL;
+
+
+LX_NATIVE_MODULE_DEINIT({
+    ExitListItem *next = GExitList;
+    GExitList = NULL;
+    for (ExitListItem *item = next; item; item = next) {
+        next = item->next;
+        free(item);
+    } // for
+    free(HFiles);
+    HFiles = NULL;
+    GLoaderState = NULL;
+})
+
+LX_NATIVE_MODULE_INIT({ GLoaderState = lx_state; })
+    LX_NATIVE_EXPORT(DosQueryHType, 224),
+    LX_NATIVE_EXPORT(DosScanEnv, 227),
+    LX_NATIVE_EXPORT(DosExit, 234),
+    LX_NATIVE_EXPORT(DosWrite, 282),
+    LX_NATIVE_EXPORT(DosExitList, 296),
+    LX_NATIVE_EXPORT(DosAllocMem, 299),
+    LX_NATIVE_EXPORT(DosSetMem, 305),
+    LX_NATIVE_EXPORT(DosGetInfoBlocks, 312),
+    LX_NATIVE_EXPORT(DosQueryModuleName, 320),
+    LX_NATIVE_EXPORT(DosCreateEventSem, 324),
+    LX_NATIVE_EXPORT(DosCreateMutexSem, 331),
+    LX_NATIVE_EXPORT(DosSubSetMem, 344),
+    LX_NATIVE_EXPORT(DosSubAllocMem, 345),
+    LX_NATIVE_EXPORT(DosQuerySysInfo, 348),
+    LX_NATIVE_EXPORT(DosSetExceptionHandler, 354),
+    LX_NATIVE_EXPORT(DosSetSignalExceptionFocus, 378),
+    LX_NATIVE_EXPORT(DosSetRelMaxFH, 382),
+    LX_NATIVE_EXPORT(DosFlatToSel, 425)
+LX_NATIVE_MODULE_INIT_END()
+
 
 APIRET DosGetInfoBlocks(PTIB *pptib, PPIB *pppib)
 {
@@ -293,13 +331,13 @@ APIRET DosSetExceptionHandler(PEXCEPTIONREGISTRATIONRECORD rec)
     return NO_ERROR;
 } // DosSetExceptionHandler
 
-static uint32 DosFlatToSel(void)
+ULONG DosFlatToSel(void)
 {
     // this actually passes the arg in eax instead of the stack.
     uint32 eax = 0;
     __asm__ __volatile__ ("" : "=a" (eax));
     TRACE_NATIVE("DosFlatToSel(%p)", (void *) (size_t) eax);
-    return 0x12345678;  // !!! FIXME
+    return (ULONG) 0x12345678;  // !!! FIXME
 } // DosFlatToSel
 
 APIRET DosSetSignalExceptionFocus(BOOL32 flag, PULONG pulTimes)

@@ -1,10 +1,8 @@
 #include "os2native.h"
 #include "quecalls.h"
 
-NATIVE_MODULE(quecalls);
-
-NATIVE_REPLACEMENT_TABLE("quecalls")
-END_NATIVE_REPLACEMENT_TABLE()
+LX_NATIVE_MODULE_INIT()
+LX_NATIVE_MODULE_INIT_END()
 
 // end of quecalls.c ...
 

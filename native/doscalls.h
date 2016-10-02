@@ -107,6 +107,7 @@ APIRET OS2API DosExitList(ULONG ordercode, PFNEXITLIST pfn);
 APIRET OS2API DosCreateEventSem(PSZ pszName, PHEV phev, ULONG flAttr, BOOL32 fState);
 APIRET OS2API DosCreateMutexSem(PSZ pszName, PHMTX phmtx, ULONG flAttr, BOOL32 fState);
 APIRET OS2API DosSetExceptionHandler(PEXCEPTIONREGISTRATIONRECORD pERegRec);
+ULONG OS2API DosFlatToSel(void);
 APIRET OS2API DosSetSignalExceptionFocus(BOOL32 flag, PULONG pulTimes);
 
 #ifdef __cplusplus

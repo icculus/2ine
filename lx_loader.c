@@ -15,7 +15,6 @@
 static LxLoaderState _GLoaderState;
 static LxLoaderState *GLoaderState = &_GLoaderState;
 
-
 // !!! FIXME: move this into an lx_common.c file.
 static int sanityCheckLxModule(uint8 **_exe, uint32 *_exelen)
 {
@@ -215,7 +214,7 @@ static void missingEntryPointCalled(const char *module, const char *entry)
     _exit(1);
 } // missing_ordinal_called
 
-static uint32 generateMissingTrampoline(const char *_module, const char *_entry)
+static void *generateMissingTrampoline(const char *_module, const char *_entry)
 {
     static void *page = NULL;
     static uint32 pageused = 0;
@@ -261,9 +260,9 @@ static uint32 generateMissingTrampoline(const char *_module, const char *_entry)
     if (pageused % 4)  // keep these aligned to 32 bits.
         pageused += (4 - (pageused % 4));
 
-    printf("Generated trampoline %p for module '%s' export '%s'\n", trampoline, module, entry);
+    //printf("Generated trampoline %p for module '%s' export '%s'\n", trampoline, module, entry);
 
-    return (uint32) (size_t) trampoline;
+    return trampoline;
 } // generateMissingTrampoline
 
 static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int argc, char **argv)
@@ -343,7 +342,6 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
 
 static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
 {
-    // ...and you pass it the pointer to argv0. This is (at least as far as the docs suggest) appended to the environment table.
     printf("jumping into LX land to %s library...! eip=0x%X esp=0x%X\n", isTermination ? "terminate" : "initialize", (uint) lxmod->eip, (uint) GLoaderState->main_module->esp); fflush(stdout);
 
     // !!! FIXME: need to set up OS/2 TIB and put it in FS register.
@@ -395,8 +393,15 @@ static void freeLxModule(LxModule *lxmod)
     if (lxmod->refcount > 0)
         return;  // something is still using it.
 
-    if (lxmod->initialized)
-        runLxLibraryTerm(lxmod);
+    if (lxmod->initialized) {
+        if (!lxmod->nativelib) {
+            runLxLibraryTerm(lxmod);
+        } else {
+            LxNativeModuleDeinitEntryPoint fn = (LxNativeModuleDeinitEntryPoint) dlsym(lxmod->nativelib, "lxNativeModuleDeinit");
+            if (fn)
+                fn();
+        } // else
+    } // if
 
     if (lxmod->next)
         lxmod->next->prev = lxmod->prev;
@@ -419,27 +424,29 @@ static void freeLxModule(LxModule *lxmod)
         if (lxmod->mmaps[i].addr)
             munmap(lxmod->mmaps[i].addr, lxmod->mmaps[i].size);
     } // for
-    free(lxmod->mmaps);
-
-    free(lxmod->exported_names);
-    free(lxmod->exported_ordinals);
+    free(lxmod->mmaps);    
 
     if (lxmod->nativelib)
         dlclose(lxmod->nativelib);
+    else {
+        for (uint32 i = 0; i < lxmod->num_exports; i++)
+            free((void *) lxmod->exports[i].name);
+        free((void *) lxmod->exports);
+    } // else
 
     free(lxmod);
 } // freeLxModule
 
 static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int dependency_tree_depth);
 
-static uint32 getModuleProcAddrByOrdinal(const LxModule *module, const uint32 ordinal)
+static void *getModuleProcAddrByOrdinal(const LxModule *module, const uint32 ordinal)
 {
-    printf("lookup module == '%s', ordinal == %u\n", module->name, (uint) ordinal);
+    //printf("lookup module == '%s', ordinal == %u\n", module->name, (uint) ordinal);
 
-    const LxExportedOrdinal *expord = module->exported_ordinals;
-    for (uint32 i = 0; i < module->num_ordinals; i++, expord++) {
-        if (expord->ordinal == ordinal)
-            return expord->addr;
+    const LxExport *lxexp = module->exports;
+    for (uint32 i = 0; i < module->num_exports; i++, lxexp++) {
+        if (lxexp->ordinal == ordinal)
+            return lxexp->addr;
     } // for
 
     #if 1
@@ -447,25 +454,25 @@ static uint32 getModuleProcAddrByOrdinal(const LxModule *module, const uint32 or
     snprintf(entry, sizeof (entry), "ORDINAL_%u", (uint) ordinal);
     return generateMissingTrampoline(module->name, entry);
     #else
-    return 0;
+    return NULL;
     #endif
 } // getModuleProcAddrByOrdinal
 
 #if 0
-static uint32 getModuleProcAddrByName(const LxModule *module, const char *name)
+static void *getModuleProcAddrByName(const LxModule *module, const char *name)
 {
-    printf("lookup module == '%s', name == '%s'\n", module->name, name);
+    //printf("lookup module == '%s', name == '%s'\n", module->name, name);
 
-    const LxExportedName *expname = module->exported_names;
-    for (uint32 i = 0; i < module->num_names; i++, expname++) {
-        if (strcmp(expname->name, name) == 0)
-            return expname->addr;
+    const LxExport *lxexp = module->exports;
+    for (uint32 i = 0; i < module->num_exports; i++, lxexp++) {
+        if (strcmp(lxexp->name, name) == 0)
+            return lxexp->addr;
     } // for
 
     #if 1
     return generateMissingTrampoline(module->name, name);
     #else
-    return 0;
+    return NULL;
     #endif
 } // getModuleProcAddrByName
 #endif
@@ -501,15 +508,15 @@ static void doFixup(uint8 *page, const sint16 offset, const uint32 finalval, con
 static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntry *obj, const uint32 pagenum, uint8 *page)
 {
     const LxHeader *lx = &lxmod->lx;
-const LxObjectTableEntry *origobj = ((const LxObjectTableEntry *) (exe + lx->object_table_offset));
+//const LxObjectTableEntry *origobj = ((const LxObjectTableEntry *) (exe + lx->object_table_offset));
     const uint32 *fixuppage = (((const uint32 *) (exe + lx->fixup_page_table_offset)) + ((obj->page_table_index - 1) + pagenum));
     const uint32 fixupoffset = *fixuppage;
     const uint32 fixuplen = fixuppage[1] - fixuppage[0];
     const uint8 *fixup = (exe + lx->fixup_record_table_offset) + fixupoffset;
     const uint8 *fixupend = fixup + fixuplen;
-    int record = 0;
+//    int record = 0;
     while (fixup < fixupend) {
-record++; printf("FIXUP obj #%u page #%u record #: %d\n", (uint) (obj - origobj), (uint) pagenum, record);
+//record++; printf("FIXUP obj #%u page #%u record #: %d\n", (uint) (obj - origobj), (uint) pagenum, record);
         const uint8 srctype = *(fixup++);
         const uint8 fixupflags = *(fixup++);
         uint8 srclist_count = 0;
@@ -590,7 +597,7 @@ record++; printf("FIXUP obj #%u page #%u record #: %d\n", (uint) (obj - origobj)
                 } else if (moduleid > lx->num_import_mod_entries) {
                     fprintf(stderr, "uhoh, looking for module ordinal %u, but only %u available.\n", (uint) moduleid, (uint) lx->num_import_mod_entries);
                 } else {
-                    finalval = getModuleProcAddrByOrdinal(lxmod->dependencies[moduleid-1], importid);
+                    finalval = (uint32) (size_t) getModuleProcAddrByOrdinal(lxmod->dependencies[moduleid-1], importid);
                 } // else
                 break;
             } // case
@@ -701,7 +708,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
     } // else if
 
     const char *modname = retval->name;
-    printf("ref'd new module '%s' to %u\n", modname, 1);
+    //printf("ref'd new module '%s' to %u\n", modname, 1);
 
     // !!! FIXME: apparently OS/2 does 1024, but they're not loading the module into RAM each time.
     // !!! FIXME: the spec mentions the 1024 thing for "forwarder" records in the entry table,
@@ -788,7 +795,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
     } // for
 
     // All the pages we need from the EXE are loaded into the appropriate spots in memory.
-    printf("mmap()'d everything we need!\n");
+    //printf("mmap()'d everything we need!\n");
 
     retval->eip = lx->eip;
     if (lx->eip_object != 0) {
@@ -818,14 +825,14 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
         }
     } // while
 
-    retval->exported_ordinals = (LxExportedOrdinal *) malloc(sizeof (LxExportedOrdinal) * total_ordinals);
-    if (!retval->exported_ordinals) {
+    LxExport *lxexp = (LxExport *) malloc(sizeof (LxExport) * total_ordinals);
+    if (!lxexp) {
         fprintf(stderr, "Out of memory!\n");
         goto loadlx_failed;
     } // if
-    memset(retval->exported_ordinals, '\0', sizeof (LxExportedOrdinal) * total_ordinals);
+    memset(lxexp, '\0', sizeof (LxExport) * total_ordinals);
+    retval->exports = lxexp;
 
-    LxExportedOrdinal *expord = retval->exported_ordinals;
     uint32 ordinal = 1;
     entryptr = exe + lx->entry_table_offset;
     while (*entryptr) {  /* end field has a value of zero. */
@@ -843,9 +850,9 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
                 entryptr += 2;
                 for (uint8 i = 0; i < numentries; i++) {
                     entryptr++;
-                    expord->ordinal = ordinal++;
-                    expord->addr = (uint32) (size_t) ((uint8 *) retval->mmaps[objidx].addr) + *((const uint16 *) entryptr);
-                    expord++;
+                    lxexp->ordinal = ordinal++;
+                    lxexp->addr = ((uint8 *) retval->mmaps[objidx].addr) + *((const uint16 *) entryptr);
+                    lxexp++;
                     entryptr += 2;
                 } // for
                 break;
@@ -855,9 +862,9 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
                 entryptr += 2;
                 for (uint8 i = 0; i < numentries; i++) {
                     entryptr++;
-                    expord->ordinal = ordinal++;
-                    expord->addr = (uint32) (size_t) ((uint8 *) retval->mmaps[objidx].addr) + *((const uint32 *) entryptr);
-                    expord++;
+                    lxexp->ordinal = ordinal++;
+                    lxexp->addr = ((uint8 *) retval->mmaps[objidx].addr) + *((const uint32 *) entryptr);
+                    lxexp++;
                     entryptr += 4;
                 }
                 break;
@@ -873,10 +880,10 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
         } // switch
     } // while
 
-    retval->num_ordinals = (uint32) (expord - retval->exported_ordinals);
+    retval->num_exports = (uint32) (lxexp - retval->exports);
 
     // Now load named entry points.
-    printf("FIXME: load named entry points\n");
+    //printf("FIXME: load named entry points\n");
 
     // Load other dependencies of this module.
     const uint8 *import_modules_table = exe + lx->import_module_table_offset;
@@ -1004,40 +1011,50 @@ static inline LxModule *loadLxModuleByPath(const char *fname)
     return loadLxModuleByPathInternal(fname, 0);
 } // loadLxModuleByPath
 
-static LxModule *loadNativeReplacement(const char *fname)
+static LxModule *loadNativeModule(const char *fname, const char *modname)
 {
-    LxModule *retval = NULL;
+    LxModule *retval = (LxModule *) malloc(sizeof (LxModule));
     void *lib = NULL;
-    LxNativeReplacementEntryPoint fn = NULL;
+    LxNativeModuleInitEntryPoint fn = NULL;
+    const LxExport *exports = NULL;
+    uint32 num_exports = 0;
     char *os2path = makeOS2Path(fname);
 
-    if (!os2path)
+    if (!retval || !modname || !os2path)
         goto loadnative_failed;
+        
+    memset(retval, '\0', sizeof(*retval));
 
     // !!! FIXME: mutex this.
     lib = dlopen(fname, RTLD_LOCAL | RTLD_NOW);
     if (lib == NULL)
         goto loadnative_failed;
 
-    fn = (LxNativeReplacementEntryPoint) dlsym(lib, "loadNativeLxModule");
+    fn = (LxNativeModuleInitEntryPoint) dlsym(lib, "lxNativeModuleInit");
     if (!fn)
         goto loadnative_failed;
 
-    retval = fn(GLoaderState);
-    if (!retval)
+    exports = fn(GLoaderState, &num_exports);
+    if (!exports)
         goto loadnative_failed;
-
-    printf("Loaded native replacement library '%s' (%u exports).\n", fname, (uint) retval->num_ordinals);
+    retval->refcount = 1;
+    strcpy(retval->name, modname);
     retval->nativelib = lib;
     retval->os2path = os2path;
+    retval->exports = exports;
+    retval->num_exports = num_exports;
+    retval->initialized = 1;
+
+    printf("Loaded native module '%s' (%u exports).\n", fname, (uint) num_exports);
 
     return retval;
 
 loadnative_failed:
     if (lib) dlclose(lib);
     free(os2path);
+    free(retval);
     return NULL;
-} // loadNativeReplacement
+} // loadNativeModule
 
 static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int dependency_tree_depth)
 {
@@ -1045,7 +1062,7 @@ static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int
     for (LxModule *i = GLoaderState->loaded_modules; i != NULL; i = i->next) {
         if (strcasecmp(i->name, modname) == 0) {
             i->refcount++;
-            printf("ref'd module '%s' to %u\n", i->name, (uint) i->refcount);
+            //printf("ref'd module '%s' to %u\n", i->name, (uint) i->refcount);
             return i;
         } // if
     } // for
@@ -1059,7 +1076,7 @@ static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int
         for (char *ptr = fname; *ptr; ptr++) {
             *ptr = (((*ptr >= 'A') && (*ptr <= 'Z')) ? (*ptr - ('A' - 'a')) : *ptr);
         } // for
-        retval = loadNativeReplacement(fname);
+        retval = loadNativeModule(fname, modname);
     } // if
     return retval;
 } // loadLxModuleByModuleNameInternal

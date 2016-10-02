@@ -1,10 +1,8 @@
 #include "os2native.h"
 #include "kbdcalls.h"
 
-NATIVE_MODULE(kdbcalls);
-
-NATIVE_REPLACEMENT_TABLE("kbdcalls")
-END_NATIVE_REPLACEMENT_TABLE()
+LX_NATIVE_MODULE_INIT()
+LX_NATIVE_MODULE_INIT_END()
 
 // end of kbdcalls.c ...
 

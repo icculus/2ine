@@ -1,10 +1,8 @@
 #include "os2native.h"
 #include "sesmgr.h"
 
-NATIVE_MODULE(sesmgr);
-
-NATIVE_REPLACEMENT_TABLE("sesmgr")
-END_NATIVE_REPLACEMENT_TABLE()
+LX_NATIVE_MODULE_INIT()
+LX_NATIVE_MODULE_INIT_END()
 
 // end of sesmgr.c ...
 

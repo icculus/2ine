@@ -105,17 +105,12 @@ typedef struct LxMmaps
     size_t size;
 } LxMmaps;
 
-typedef struct LxExportedOrdinal
+typedef struct LxExport
 {
     uint32 ordinal;
-    uint32 addr;
-} LxExportedOrdinal;
-
-typedef struct LxExportedName
-{
-    char name[128];  // !!! FIXME: allocate this.
-    uint32 addr;
-} LxExportedName;
+    const char *name;  // can be NULL
+    void *addr;
+} LxExport;
 
 struct LxModule;
 typedef struct LxModule LxModule;
@@ -126,10 +121,8 @@ struct LxModule
     char name[256];  // !!! FIXME: allocate this.
     LxModule **dependencies;
     LxMmaps *mmaps;
-    uint32 num_ordinals;
-    LxExportedOrdinal *exported_ordinals;
-    uint32 num_names;
-    LxExportedName *exported_names;
+    const LxExport *exports;
+    uint32 num_exports;
     void *nativelib;
     uint32 eip;
     uint32 esp;
@@ -137,6 +130,7 @@ struct LxModule
     char *env;
     char *cmd;
     char *os2path;  // absolute path to module, in OS/2 format
+    // !!! FIXME: put this elsewhere?
     uint32 signal_exception_focus_count;
     LxModule *prev;  // all loaded modules are in a doubly-linked list.
     LxModule *next;  // all loaded modules are in a doubly-linked list.
@@ -148,7 +142,8 @@ typedef struct
     LxModule *main_module;
 } LxLoaderState;
 
-typedef LxModule *(*LxNativeReplacementEntryPoint)(LxLoaderState *state);
+typedef const LxExport *(*LxNativeModuleInitEntryPoint)(LxLoaderState *lx_state, uint32 *lx_num_exports);
+typedef void (*LxNativeModuleDeinitEntryPoint)(void);
 
 #endif
 
