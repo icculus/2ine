@@ -271,6 +271,7 @@ APIRET DosExitList(ULONG ordercode, PFNEXITLIST fn)
             ExitListItem *newitem = (ExitListItem *) malloc(sizeof (ExitListItem));
             if (!newitem)
                 return ERROR_NOT_ENOUGH_MEMORY;
+            newitem->fn = fn;
             for (item = GExitList; item; item = item->next) {
                 if (item->priority >= ((uint32) arg))
                     break;
