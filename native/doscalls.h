@@ -109,6 +109,12 @@ APIRET OS2API DosCreateMutexSem(PSZ pszName, PHMTX phmtx, ULONG flAttr, BOOL32 f
 APIRET OS2API DosSetExceptionHandler(PEXCEPTIONREGISTRATIONRECORD pERegRec);
 ULONG OS2API DosFlatToSel(void);
 APIRET OS2API DosSetSignalExceptionFocus(BOOL32 flag, PULONG pulTimes);
+APIRET OS2API DosSetRelMaxFH(PLONG pcbReqCount, PULONG pcbCurMaxFH);
+APIRET OS2API DosAllocMem(PPVOID ppb, ULONG cb, ULONG flag);
+APIRET OS2API DosSubSetMem(PVOID pbBase, ULONG flag, ULONG cb);
+APIRET OS2API DosSubAllocMem(PVOID pbBase, PPVOID ppb, ULONG cb);
+APIRET OS2API DosQueryHType(HFILE hFile, PULONG pType, PULONG pAttr);
+APIRET OS2API DosSetMem(PVOID pb, ULONG cb, ULONG flag);
 
 #ifdef __cplusplus
 }

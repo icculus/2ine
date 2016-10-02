@@ -365,21 +365,67 @@ APIRET DosSetSignalExceptionFocus(BOOL32 flag, PULONG pulTimes)
     return NO_ERROR;
 } // DosSetSignalExceptionFocus
 
+APIRET DosSetRelMaxFH(PLONG incr, PULONG pcurrent)
+{
+    TRACE_NATIVE("DosSetRelMaxFH(%p, %p)", incr, pcurrent);
 
-NATIVE_REPLACEMENT_TABLE("doscalls")
-    NATIVE_REPLACEMENT(DosScanEnv, 227)
-    NATIVE_REPLACEMENT(DosExit, 234)
-    NATIVE_REPLACEMENT(DosWrite, 282)
-    NATIVE_REPLACEMENT(DosExitList, 296)
-    NATIVE_REPLACEMENT(DosGetInfoBlocks, 312)
-    NATIVE_REPLACEMENT(DosQueryModuleName, 320)
-    NATIVE_REPLACEMENT(DosCreateEventSem, 324)
-    NATIVE_REPLACEMENT(DosCreateMutexSem, 331)
-    NATIVE_REPLACEMENT(DosQuerySysInfo, 348)
-    NATIVE_REPLACEMENT(DosSetExceptionHandler, 354)
-    NATIVE_REPLACEMENT(DosSetSignalExceptionFocus, 378)
-    NATIVE_REPLACEMENT(DosFlatToSel, 425)
-END_NATIVE_REPLACEMENT_TABLE()
+    struct rlimit rlim;
+    int rc = getrlimit(RLIMIT_NOFILE, &rlim);
+    assert(rc == 0);  // this shouldn't fail...right?
+    if (pcurrent)
+        *pcurrent = (ULONG) rlim.rlim_cur;
+
+    if (incr) {
+        rlim.rlim_cur = (rlim_t) (((LONG) rlim.rlim_cur) + *incr);
+        if (setrlimit(RLIMIT_NOFILE, &rlim) == 0) {
+            if (pcurrent)
+                *pcurrent = (ULONG) rlim.rlim_cur;
+        } // if
+    } // if
+
+    return NO_ERROR;  // always returns NO_ERROR even if it fails.
+} // DosSetRelMaxFH
+
+
+APIRET DosAllocMem(PPVOID ppb, ULONG cb, ULONG flag)
+{
+    TRACE_NATIVE("DosAllocMem(%p, %u, %u)", ppb, (uint) cb, (uint) flag);
+
+    // !!! FIXME: this API is actually much more complicated than this.
+    *ppb = malloc(cb);
+    if (!*ppb)
+        return ERROR_NOT_ENOUGH_MEMORY;
+    return NO_ERROR;
+} // DosAllocMem
+
+
+APIRET DosSubSetMem(PVOID pbBase, ULONG flag, ULONG cb)
+{
+    TRACE_NATIVE("DosSubSetMem(%p, %u, %u)", pbBase, (uint) flag, (uint) cb);
+    return NO_ERROR;  // !!! FIXME: obviously wrong
+} // DosSubSetMem
+
+
+APIRET DosSubAllocMem(PVOID pbBase, PPVOID ppb, ULONG cb)
+{
+    TRACE_NATIVE("DosSubAllocMem(%p, %p, %u)", pbBase, ppb, (uint) cb);
+    *ppb = malloc(cb);  // !!! FIXME: obviously wrong
+    if (!*ppb)
+        return ERROR_NOT_ENOUGH_MEMORY;
+    return NO_ERROR;
+} // DosSubAllocMem
+
+APIRET DosQueryHType(HFILE hFile, PULONG pType, PULONG pAttr)
+{
+    TRACE_NATIVE("DosQueryHType(%u, %p, %p)", (uint) hFile, pType, pAttr);
+    return ERROR_INVALID_HANDLE;  // !!! FIXME: write me
+} // DosQueryHType
+
+APIRET DosSetMem(PVOID pb, ULONG cb, ULONG flag)
+{
+    TRACE_NATIVE("DosSetMem(%p, %u, %u)", pb, (uint) cb, (uint) flag);
+    return NO_ERROR;  // !!! FIXME: obviously wrong.
+} // DosSetMem
 
 // end of doscalls.c ...
 
