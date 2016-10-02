@@ -919,8 +919,16 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
 
         // !!! FIXME: hack to nop out some 16-bit code in emx.dll startup...
         if ((i == 1) && (strcmp(modname, "EMX") == 0)) {
+            // This is the 16-bit signal handler installer. nop it out.
             uint8 *ptr = ((uint8 *) retval->mmaps[1].addr) + 28596;
             for (uint32 i = 0; i < 37; i++)
+                *(ptr++) = 0x90; // nop
+
+            // This is a read of the FS register for the TIB, but we need to wire that up still.
+            ptr = ((uint8 *) retval->mmaps[1].addr) + 237;
+            *(ptr++) = 0x31;  // xorl %esi,%esi ...makes next piece of code skip TIB stuff.
+            *(ptr++) = 0xf6;
+            for (uint32 i = 0; i < 14; i++)
                 *(ptr++) = 0x90; // nop
         }
 
