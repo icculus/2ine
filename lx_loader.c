@@ -1085,6 +1085,16 @@ static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int
             *ptr = (((*ptr >= 'A') && (*ptr <= 'Z')) ? (*ptr - ('A' - 'a')) : *ptr);
         } // for
         retval = loadNativeModule(fname, modname);
+
+        if (retval != NULL) {
+            // module is ready to use, put it in the loaded list.
+            // !!! FIXME: mutex this
+            if (GLoaderState->loaded_modules) {
+                retval->next = GLoaderState->loaded_modules;
+                GLoaderState->loaded_modules->prev = retval;
+            } // if
+            GLoaderState->loaded_modules = retval;
+        } // if
     } // if
     return retval;
 } // loadLxModuleByModuleNameInternal
