@@ -21,8 +21,40 @@ typedef struct ExitListItem
 
 static ExitListItem *GExitList = NULL;
 
-static int *HFiles = NULL;
+// Flags returned for character devices from DosQueryHType()...
+enum {
+    DAW_STDIN  = (1 << 0),
+    DAW_STDOUT = (1 << 1),
+    DAW_NUL = (1 << 2),
+    DAW_CLOCK = (1 << 3),
+    DAW_SPEC = (1 << 4),
+    DAW_ADD_ON = (1 << 5),
+    DAW_GIOCTL  = (1 << 6),
 
+    DAW_LEVEL0 = 0,
+    DAW_LEVEL1 = (1 << 7),
+    DAW_LEVEL2 = (1 << 8),
+    DAW_LEVEL3 = (1 << 7) | (1 << 8),
+    DAW_FCNLEV = (1 << 7) | (1 << 8) | (1 << 9),
+
+    // ((1 << 10) is reserved, I think.)
+
+    DAW_OPENCLOSE = (1 << 11),
+    DAW_SHARE = (1 << 12),
+    DAW_NONIBM = (1 << 13),
+    DAW_IDC = (1 << 14),
+    DAW_CHARACTER = (1 << 15)
+};
+
+typedef struct HFileInfo
+{
+    int fd;
+    ULONG type;
+    ULONG attr;
+} HFileInfo;
+
+static HFileInfo *HFiles = NULL;
+static uint32 MaxHFiles = 0;
 
 LX_NATIVE_MODULE_DEINIT({
     ExitListItem *next = GExitList;
@@ -33,10 +65,47 @@ LX_NATIVE_MODULE_DEINIT({
     } // for
     free(HFiles);
     HFiles = NULL;
+    MaxHFiles = 0;
     GLoaderState = NULL;
 })
 
-LX_NATIVE_MODULE_INIT({ GLoaderState = lx_state; })
+static int initDoscalls(LxLoaderState *lx_state)
+{
+    GLoaderState = lx_state;
+    MaxHFiles = 20;  // seems to be OS/2's default.
+    HFiles = (HFileInfo *) malloc(sizeof (HFileInfo) * MaxHFiles);
+    if (!HFiles) {
+        fprintf(stderr, "Out of memory!\n");
+        return 0;
+    } // if
+
+    HFileInfo *info = HFiles;
+    for (uint32 i = 0; i < MaxHFiles; i++, info++) {
+        info->fd = -1;
+        info->type = 0;
+        info->attr = 0;
+    } // for
+
+    // launching a Hello World program from CMD.EXE seems to inherit several
+    //  file handles. 0, 1, 2 seem to map to stdin, stdout, stderr (and will
+    //  be character devices (maybe CON?) by default, unless you redirect
+    //  to a file in which case they're physical files, and using '|' in
+    //  CMD.EXE will make handle 1 into a Pipe, of course.
+    // Handles, 4, 6 and 9 were also in use (all character devices, attributes
+    //  51585, 51392, 51392), but I don't know what these are, if they are
+    //  inherited from CMD.EXE or supplied by OS/2 for whatever purpose.
+    //  For now, we just wire up stdio.
+
+    for (int i = 0; i <= 2; i++) {
+        HFiles[i].fd = i;
+        HFiles[i].type = 1;  // !!! FIXME: could be a pipe or file.
+        HFiles[i].attr = DAW_STDIN | DAW_STDOUT | DAW_LEVEL1 | DAW_CHARACTER;
+    } // for
+
+    return 1;
+} // initDoscalls
+
+LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
     LX_NATIVE_EXPORT(DosQueryHType, 224),
     LX_NATIVE_EXPORT(DosScanEnv, 227),
     LX_NATIVE_EXPORT(DosExit, 234),
@@ -204,11 +273,17 @@ APIRET DosScanEnv(PSZ name, PSZ *outval)
 APIRET DosWrite(HFILE h, PVOID buf, ULONG buflen, PULONG actual)
 {
     TRACE_NATIVE("DosWrite(%u, %p, %u, %p)", (uint) h, buf, (uint) buflen, actual);
-    // !!! FIXME: writing to a terminal should convert CR/LF to LF.
-    // OS/2 appears to use 0, 1, 2 for stdin, stdout, stderr, like Unix! Hooray!
-    const int rc = write((int) h, buf, buflen);
-    if (rc < 0)
+
+    // !!! FIXME: writing to a terminal should probably convert CR/LF to LF.
+
+    if ((h >= MaxHFiles) || (HFiles[h].fd == -1))
+        return ERROR_INVALID_HANDLE;
+
+    const int rc = write(HFiles[h].fd, buf, buflen);
+    if (rc < 0) {
+        *actual = 0;
         return ERROR_DISK_FULL;  // !!! FIXME: map these errors.
+    } // if
 
     *actual = (uint32) rc;
     return NO_ERROR;
@@ -365,22 +440,46 @@ APIRET DosSetSignalExceptionFocus(BOOL32 flag, PULONG pulTimes)
     return NO_ERROR;
 } // DosSetSignalExceptionFocus
 
-APIRET DosSetRelMaxFH(PLONG incr, PULONG pcurrent)
+APIRET DosSetRelMaxFH(PLONG pincr, PULONG pcurrent)
 {
-    TRACE_NATIVE("DosSetRelMaxFH(%p, %p)", incr, pcurrent);
+    TRACE_NATIVE("DosSetRelMaxFH(%p, %p)", pincr, pcurrent);
 
+    #if 0
     struct rlimit rlim;
     int rc = getrlimit(RLIMIT_NOFILE, &rlim);
     assert(rc == 0);  // this shouldn't fail...right?
     if (pcurrent)
         *pcurrent = (ULONG) rlim.rlim_cur;
 
-    if (incr) {
-        rlim.rlim_cur = (rlim_t) (((LONG) rlim.rlim_cur) + *incr);
+    if (pincr) {
+        rlim.rlim_cur = (rlim_t) (((LONG) rlim.rlim_cur) + *pincr);
         if (setrlimit(RLIMIT_NOFILE, &rlim) == 0) {
             if (pcurrent)
                 *pcurrent = (ULONG) rlim.rlim_cur;
         } // if
+    } // if
+    #endif
+
+    if (pincr != NULL) {
+        const LONG incr = *pincr;
+        // OS/2 API docs say reductions in file handles are advisory, so we
+        //  ignore them outright. Fight me.
+        if (incr > 0) {
+            HFileInfo *info = (HFileInfo *) realloc(HFiles, sizeof (HFileInfo) * (MaxHFiles + incr));
+            if (info != NULL) {
+                HFiles = info;
+                for (LONG i = 0; i < incr; i++, info++) {
+                    info->fd = -1;
+                    info->type = 0;
+                    info->attr = 0;
+                } // for
+                MaxHFiles += incr;
+            } // if
+        } // if
+    } // if
+
+    if (pcurrent != NULL) {
+        *pcurrent = MaxHFiles;
     } // if
 
     return NO_ERROR;  // always returns NO_ERROR even if it fails.
@@ -418,7 +517,15 @@ APIRET DosSubAllocMem(PVOID pbBase, PPVOID ppb, ULONG cb)
 APIRET DosQueryHType(HFILE hFile, PULONG pType, PULONG pAttr)
 {
     TRACE_NATIVE("DosQueryHType(%u, %p, %p)", (uint) hFile, pType, pAttr);
-    return ERROR_INVALID_HANDLE;  // !!! FIXME: write me
+
+    if ((hFile >= MaxHFiles) || (HFiles[hFile].fd == -1))
+        return ERROR_INVALID_HANDLE;
+
+    // OS/2 will dereference a NULL pointer here, but I can't do it...!!!
+    if (pType) *pType = HFiles[hFile].type;
+    if (pAttr) *pAttr = HFiles[hFile].attr;
+
+    return NO_ERROR;
 } // DosQueryHType
 
 APIRET DosSetMem(PVOID pb, ULONG cb, ULONG flag)
