@@ -479,7 +479,7 @@ static void *getModuleProcAddrByName(const LxModule *module, const char *name)
 
 static void doFixup(uint8 *page, const sint16 offset, const uint32 finalval, const uint16 finalval2, const uint32 finalsize)
 {
-    #if 1
+    #if 0
     if (finalsize == 6) {
         printf("fixing up %p to 0x%X:0x%X (6 bytes)...\n", page + offset, (uint) finalval2, (uint) finalval);
     } else {
