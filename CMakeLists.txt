@@ -44,6 +44,7 @@ else()
 endif()
 
 add_definitions(-std=c99 -Wall -ggdb3)
+add_definitions(-D_FILE_OFFSET_BITS=64)
 
 foreach(_I doscalls;msg;nls;quecalls;viocalls;kbdcalls;sesmgr)
     add_library(${_I} SHARED "native/${_I}.c")
