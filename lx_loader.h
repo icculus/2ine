@@ -18,6 +18,32 @@ typedef int32_t sint32;
 
 typedef unsigned int uint;
 
+#ifndef _STUBBED
+    #define _STUBBED(x, what) do { \
+        static int seen_this = 0; \
+        if (!seen_this) { \
+            seen_this = 1; \
+            fprintf(stderr, "2INE " what ": %s at %s (%s:%d)\n", x, __FUNCTION__, __FILE__, __LINE__); \
+        } \
+    } while (0)
+#endif
+
+#if 1
+#ifndef STUBBED
+#define STUBBED(x) _STUBBED(x, "STUBBED")
+#endif
+#ifndef FIXME
+#define FIXME(x) _STUBBED(x, "FIXME")
+#endif
+#endif
+
+#ifndef STUBBED
+    #define STUBBED(x) do {} while (0)
+#endif
+#ifndef FIXME
+    #define FIXME(x) do {} while (0)
+#endif
+
 #pragma pack(push, 1)
 typedef struct LxHeader
 {
