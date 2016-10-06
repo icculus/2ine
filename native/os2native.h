@@ -4,13 +4,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <errno.h>
 
 #include "os2types.h"
 #include "os2errors.h"
 #include "../lx_loader.h"
 
-#if 0
-#define TRACE_NATIVE(...) do { printf("TRACE: "); printf(__VA_ARGS__); printf(";\n"); } while (0)
+#if 1
+#define TRACE_NATIVE(...) do { printf("2INE TRACE: "); printf(__VA_ARGS__); printf(";\n"); } while (0)
 #else
 #define TRACE_NATIVE(...) do {} while (0)
 #endif

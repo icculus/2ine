@@ -1,7 +1,9 @@
 #ifndef _INCL_LX_LOADER_H_
 #define _INCL_LX_LOADER_H_ 1
 
-#define _GNU_SOURCE 1
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -93,6 +93,78 @@ enum
 
 typedef void *PEXCEPTIONREGISTRATIONRECORD;  // !!! FIXME
 
+typedef struct
+{
+    UCHAR   hours;
+    UCHAR   minutes;
+    UCHAR   seconds;
+    UCHAR   hundredths;
+    UCHAR   day;
+    UCHAR   month;
+    USHORT  year;
+    SHORT   timezone;
+    UCHAR   weekday;
+} DATETIME, *PDATETIME;
+
+
+typedef void *PEAOP2; //  !!! FIXME
+
+enum
+{
+    FILE_EXISTED = 1,
+    FILE_CREATED,
+    FILE_TRUNCATED
+};
+
+enum
+{
+    FILE_OPEN = 0x01,
+    FILE_TRUNCATE = 0x02,
+    FILE_CREATE = 0x10
+};
+
+enum
+{
+    FILE_NORMAL = 0x00,
+    FILE_READONLY = 0x01,
+    FILE_HIDDEN = 0x02,
+    FILE_SYSTEM = 0x04,
+    FILE_DIRECTORY = 0x10,
+    FILE_ARCHIVED = 0x20
+};
+
+enum
+{
+    OPEN_ACTION_FAIL_IF_EXISTS = 0x0000,
+    OPEN_ACTION_OPEN_IF_EXISTS = 0x0001,
+    OPEN_ACTION_REPLACE_IF_EXISTS = 0x0002,
+    OPEN_ACTION_FAIL_IF_NEW = 0x0000,
+    OPEN_ACTION_CREATE_IF_NEW = 0x0010,
+};
+
+enum
+{
+    OPEN_ACCESS_READONLY = 0x0000,
+    OPEN_ACCESS_WRITEONLY = 0x0001,
+    OPEN_ACCESS_READWRITE = 0x0002,
+    OPEN_SHARE_DENYREADWRITE = 0x0010,
+    OPEN_SHARE_DENYWRITE = 0x0020,
+    OPEN_SHARE_DENYREAD = 0x0030,
+    OPEN_SHARE_DENYNONE = 0x0040,
+    OPEN_FLAGS_NOINHERIT = 0x0080,
+    OPEN_FLAGS_NO_LOCALITY = 0x0000,
+    OPEN_FLAGS_SEQUENTIAL = 0x0100,
+    OPEN_FLAGS_RANDOM = 0x0200,
+    OPEN_FLAGS_RANDOMSEQUENTIAL = 0x0300,
+    OPEN_FLAGS_NO_CACHE = 0x1000,
+    OPEN_FLAGS_FAIL_ON_ERROR = 0x2000,
+    OPEN_FLAGS_WRITE_THROUGH = 0x4000,
+    OPEN_FLAGS_DASD = 0x8000,
+    OPEN_FLAGS_NONSPOOLED = 0x00040000,
+    OPEN_FLAGS_PROTECTED_HANDLE = 0x40000000
+};
+
+
 // !!! FIXME: these should probably get sorted alphabetically and/or grouped
 // !!! FIXME:  into areas of functionality, but for now, I'm just listing them
 // !!! FIXME:  in the order I implemented them to get things running.
@@ -115,6 +187,8 @@ APIRET OS2API DosSubSetMem(PVOID pbBase, ULONG flag, ULONG cb);
 APIRET OS2API DosSubAllocMem(PVOID pbBase, PPVOID ppb, ULONG cb);
 APIRET OS2API DosQueryHType(HFILE hFile, PULONG pType, PULONG pAttr);
 APIRET OS2API DosSetMem(PVOID pb, ULONG cb, ULONG flag);
+APIRET OS2API DosGetDateTime(PDATETIME pdt);
+APIRET OS2API DosOpen(PSZ pszFileName, PHFILE pHf, PULONG pulAction, ULONG cbFile, ULONG ulAttribute, ULONG fsOpenFlags, ULONG fsOpenMode, PEAOP2 peaop2);
 
 #ifdef __cplusplus
 }

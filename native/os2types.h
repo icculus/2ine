@@ -23,18 +23,22 @@ typedef uint32_t APIRET;
 typedef uint16_t APIRET16;
 typedef uint32_t APIRET32;
 
-#define VOID void
-typedef uint32_t BOOL32;
-typedef int32_t LONG, *PLONG;
-typedef uint32_t ULONG, *PULONG;
-typedef char CHAR, *PCHAR;
-typedef PCHAR PSZ;
+typedef void VOID;
 typedef VOID *PVOID;
 typedef PVOID *PPVOID;
-typedef uint32_t HMODULE, *PHMODULE;
-typedef uint32_t HFILE, *PHFILE;
-typedef uint32_t HEV, *PHEV;
-typedef uint32_t HMTX, *PHMTX;
+typedef char CHAR, *PCHAR;
+typedef uint8_t UCHAR, *PUCHAR;
+typedef int16_t SHORT, *PSHORT;
+typedef uint16_t USHORT, *PUSHORT;
+typedef int32_t LONG, *PLONG;
+typedef uint32_t ULONG, *PULONG;
+typedef uint32_t BOOL32, *PBOOL32;
+typedef uint32_t HANDLE, *PHANDLE;
+typedef HANDLE HMODULE, *PHMODULE;
+typedef HANDLE HFILE, *PHFILE;
+typedef HANDLE HEV, *PHEV;
+typedef HANDLE HMTX, *PHMTX;
+typedef PCHAR PSZ;
 
 #ifdef __cplusplus
 }

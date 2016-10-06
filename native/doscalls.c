@@ -1,8 +1,13 @@
 #define _POSIX_C_SOURCE 199309
+#define _BSD_SOURCE
+#define _GNU_SOURCE
 #include <unistd.h>
 #include <limits.h>
 #include <time.h>
+#include <dirent.h>
+#include <fcntl.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/sysinfo.h>
 #include <sys/time.h>
 #include <sys/resource.h>
@@ -108,7 +113,9 @@ static int initDoscalls(LxLoaderState *lx_state)
 LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
     LX_NATIVE_EXPORT(DosQueryHType, 224),
     LX_NATIVE_EXPORT(DosScanEnv, 227),
+    LX_NATIVE_EXPORT(DosGetDateTime, 230),
     LX_NATIVE_EXPORT(DosExit, 234),
+    LX_NATIVE_EXPORT(DosOpen, 273),
     LX_NATIVE_EXPORT(DosWrite, 282),
     LX_NATIVE_EXPORT(DosExitList, 296),
     LX_NATIVE_EXPORT(DosAllocMem, 299),
@@ -533,6 +540,307 @@ APIRET DosSetMem(PVOID pb, ULONG cb, ULONG flag)
     TRACE_NATIVE("DosSetMem(%p, %u, %u)", pb, (uint) cb, (uint) flag);
     return NO_ERROR;  // !!! FIXME: obviously wrong.
 } // DosSetMem
+
+APIRET DosGetDateTime(PDATETIME pdt)
+{
+    TRACE_NATIVE("DosGetDateTime(%p)", pdt);
+
+    // we can't use time() for this, since we need sub-second resolution.
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+
+    struct tm ltm;
+    localtime_r(&tv.tv_sec, &ltm);
+
+    pdt->hours = ltm.tm_hour;
+    pdt->minutes = ltm.tm_min;
+    pdt->seconds = (ltm.tm_sec == 60) ? 59 : ltm.tm_sec;  // !!! FIXME: I assume OS/2 doesn't support leap seconds...
+    pdt->hundredths = tv.tv_usec / 10000000;  // microseconds to hundreths.
+    pdt->day = ltm.tm_mday;
+    pdt->month = ltm.tm_mon + 1;
+    pdt->year = ltm.tm_year + 1900;
+    pdt->timezone = -(ltm.tm_gmtoff / 60);  // OS/2 is minutes west of GMT, Unix is seconds east. Convert and flip!
+    pdt->weekday = ltm.tm_wday;
+    
+    return NO_ERROR;  // never returns failure.
+} // DosGetDateTime
+
+
+// based on case-insensitive search code from PhysicsFS:
+//    https://icculus.org/physfs/
+//  It's also zlib-licensed, plus I wrote it.  :)  --ryan.
+// !!! FIXME: this doesn't work as-is for UTF-8 case folding, since string
+// !!! FIXNE:  length can change!
+static int locateOneElement(char *buf)
+{
+    if (access(buf, F_OK))
+        return 1;  // quick rejection: exists in current case.
+
+    DIR *dirp;
+    char *ptr = strrchr(buf, '/');  // find entry at end of path.
+    if (ptr == NULL) {
+        dirp = opendir("/");
+        ptr = buf;
+    } else {
+        *ptr = '\0';
+        dirp = opendir(buf);
+        *ptr = '/';
+        ptr++;  // point past dirsep to entry itself.
+    } // else
+
+    for (struct dirent *dent = readdir(dirp); dent; dent = readdir(dirp)) {
+        if (strcasecmp(dent->d_name, ptr) == 0) {
+            strcpy(ptr, dent->d_name); // found a match. Overwrite with this case.
+            closedir(dirp);
+            return 1;
+        } // if
+    } // for
+
+    // no match at all...
+    closedir(dirp);
+    return 0;
+} // locateOneElement
+
+int locatePathCaseInsensitive(char *buf)
+{
+    int rc;
+    char *ptr = buf;
+
+    if (*ptr == '\0')
+        return 0;  // Uh...I guess that's success?
+
+    if (access(buf, F_OK))
+        return 0;  // quick rejection: exists in current case.
+
+    while ( (ptr = strchr(ptr + 1, '/')) != NULL ) {
+        *ptr = '\0';  // block this path section off
+        rc = locateOneElement(buf);
+        *ptr = '/'; // restore path separator
+        if (!rc)
+            return -2;  // missing element in path.
+    } // while
+
+    // check final element...
+    return locateOneElement(buf) ? 0 : -1;
+} // locatePathCaseInsensitive
+
+
+static char *makeUnixPath(const char *os2path, APIRET *err)
+{
+    if ((strcasecmp(os2path, "NUL") == 0) || (strcasecmp(os2path, "\\DEV\\NUL") == 0))
+        os2path = "/dev/null";
+    // !!! FIXME: emulate other OS/2 device names (CON, etc).
+    //else if (strcasecmp(os2path, "CON") == 0)
+    else {
+        char drive = os2path[0];
+        if ((drive >= 'a') && (drive <= 'z'))
+            drive += 'A' - 'a';
+
+        if ((drive >= 'A') && (drive <= 'Z')) {
+            if (os2path[1] == ':') {  // it's a drive letter.
+                if (drive == 'C')
+                    os2path += 2;  // skip "C:" if it's there.
+                else {
+                    *err = ERROR_NOT_DOS_DISK;
+                    return NULL;
+                } // else
+            } // if
+        } // if
+    } // else
+
+    const size_t len = strlen(os2path);
+    char *retval = (char *) malloc(len + 1);
+    if (!retval) {
+        *err = ERROR_NOT_ENOUGH_MEMORY;
+        return NULL;
+    } // else
+
+    strcpy(retval, os2path);
+
+    for (char *ptr = strchr(retval, '\\'); ptr; ptr = strchr(ptr + 1, '\\'))
+        *ptr = '/';  // convert to Unix-style path separators.
+
+    locatePathCaseInsensitive(retval);
+
+    return retval;
+} // makeUnixPath
+
+APIRET DosOpen(PSZ pszFileName, PHFILE pHf, PULONG pulAction, ULONG cbFile, ULONG ulAttribute, ULONG fsOpenFlags, ULONG fsOpenMode, PEAOP2 peaop2)
+{
+    TRACE_NATIVE("DosOpen('%s', %p, %p, %u, %u, %u, %u, %p)", pszFileName, pHf, pulAction, (uint) cbFile, (uint) ulAttribute, (uint) fsOpenFlags, (uint) fsOpenMode, peaop2);
+
+    int isReadOnly = 0;
+    int flags = 0;
+    const ULONG access_mask = OPEN_ACCESS_READONLY | OPEN_ACCESS_WRITEONLY | OPEN_ACCESS_READWRITE;
+    switch (fsOpenMode & access_mask) {
+        case OPEN_ACCESS_READONLY: isReadOnly = 1; flags |= O_RDONLY; break;
+        case OPEN_ACCESS_WRITEONLY: flags |= O_WRONLY; break;
+        case OPEN_ACCESS_READWRITE: flags |= O_RDWR; break;
+        default: return ERROR_INVALID_PARAMETER;
+    } // switch
+
+    if (isReadOnly && (cbFile != 0))
+        return ERROR_INVALID_PARAMETER;
+    else if (ulAttribute & FILE_DIRECTORY)
+        return ERROR_INVALID_PARAMETER;  // !!! FIXME: I assume you can't create a directory with DosOpen...right?
+    else if (isReadOnly && ((fsOpenFlags & 0xF0) == OPEN_ACTION_CREATE_IF_NEW))
+        return ERROR_INVALID_PARAMETER;  // !!! FIXME: is this invalid on OS/2?
+    else if (isReadOnly && ((fsOpenFlags & 0x0F) == OPEN_ACTION_REPLACE_IF_EXISTS))
+        return ERROR_INVALID_PARAMETER;  // !!! FIXME: is this invalid on OS/2?
+    else if (fsOpenFlags & 0xfffffe00)  // bits (1<<8) through (1<<31) are reserved, must be zero.
+        return ERROR_INVALID_PARAMETER;
+    else if (fsOpenFlags & OPEN_FLAGS_DASD)  // no good is going to come of this.
+        return ERROR_OPEN_FAILED;
+    else if (fsOpenMode & 0xffff0000)  // bits (1<<16) through (1<<31) are reserved, must be zero.
+        return ERROR_INVALID_PARAMETER;
+
+    if (peaop2 != NULL) {
+        FIXME("EAs not yet implemented");
+        return ERROR_OPEN_FAILED;
+    }
+
+    switch (fsOpenFlags & 0xF0) {
+        case OPEN_ACTION_FAIL_IF_NEW:
+            break;  // just don't O_CREAT and you're fine.
+
+        case OPEN_ACTION_CREATE_IF_NEW:
+            flags |= O_CREAT | O_EXCL;  // the O_EXCL is intentional! see below.
+            break;
+    } // switch
+
+    int mustNotExist = 0;
+    int isExclusive = 0;
+    int isReplacing = 0;
+
+    switch (fsOpenFlags & 0x0F) {
+        case OPEN_ACTION_FAIL_IF_EXISTS:
+            if (isReadOnly)
+                mustNotExist = 1;
+            else {
+                isExclusive = 1;
+                flags |= O_CREAT | O_EXCL;
+            } // else
+            break;
+
+        case OPEN_ACTION_OPEN_IF_EXISTS:
+            break;  // nothing to do here.
+
+        case OPEN_ACTION_REPLACE_IF_EXISTS:  // right now, we already failed above if readonly.
+            isReplacing = 1;
+            flags |= O_TRUNC;  // have the open call nuke it, and then we'll ftruncate to grow it if necessary.
+            break;
+    } // switch
+
+    if (fsOpenMode & OPEN_FLAGS_WRITE_THROUGH)
+        flags |= O_SYNC;  // !!! FIXME: this flag is supposed to drop when inherited by children, but fcntl() can't do that on Linux.
+
+    if (fsOpenMode & OPEN_FLAGS_NOINHERIT)
+        flags |= O_CLOEXEC;
+
+    if (fsOpenMode & OPEN_FLAGS_FAIL_ON_ERROR)
+        FIXME("need other file i/o APIs to do a system dialog box if this handle has i/o failures!");
+
+    // O_DIRECT isn't supported on ZFS-on-Linux, so I'm already not on board,
+    //  but also: do we care if programs intended to run on a system with a
+    //  few megabytes of RAM--on an OS that didn't have a resizeable file
+    //  cache!--writes into a multi-gigabyte machine's flexible cache? I don't!
+    //if (fsOpenMode & OPEN_FLAGS_NO_CACHE)
+    //    flags |= O_DIRECT;
+
+    FIXME("There are fsOpenMode flags we currently ignore (like sharing support)");
+
+    const mode_t mode = S_IRUSR | ((ulAttribute & FILE_READONLY) ? 0 : S_IWUSR);
+    FIXME("Most of the file attributes don't make sense on Unix, but we could stuff them in EAs");
+
+    HFileInfo *info = HFiles;
+    uint32 i;
+
+    // !!! FIXME: mutex this.
+    for (i = 0; i < MaxHFiles; i++, info++) {
+        if (info->fd == -1)  // available?
+            break;
+    } // for
+
+    if (i == MaxHFiles)
+        return ERROR_TOO_MANY_OPEN_FILES;
+
+    const HFILE hf = i;
+
+    APIRET err = NO_ERROR;
+    char *unixpath = makeUnixPath(pszFileName, &err);
+    if (!unixpath) {
+        info->fd = -1;
+        return err;
+    } // if
+
+    printf("DosOpen: converted '%s' to '%s'\n", pszFileName, unixpath);
+
+    info->fd = open(unixpath, flags, mode);
+
+    // if failed trying exclusive-create because file already exists, but we
+    //  didn't explicitly _need_ exclusivity, retry without O_EXCL. We always
+    //  try O_EXCL at first when using O_CREAT, so we can tell atomically if
+    //  we were the one that created the file, to satisfy pulAction.
+    int existed = 0;
+    if ((info->fd == -1) && (flags & (O_CREAT|O_EXCL)) && (errno == EEXIST) && !isExclusive) {
+        existed = 1;
+        info->fd = open(unixpath, flags & ~O_EXCL, mode);
+    } else if (info->fd != -1) {
+        existed = 1;
+    } // else if
+    free(unixpath);
+
+    if (info->fd != -1) {
+        if (mustNotExist) {
+            close(info->fd);
+            info->fd = -1;
+            return ERROR_OPEN_FAILED;  // !!! FIXME: what error does OS/2 return for this?
+        } else if ( (!existed || isReplacing) && (cbFile > 0) ) {
+            if (ftruncate(info->fd, cbFile) == -1) {
+                const int e = errno;
+                close(info->fd);
+                info->fd = -1;
+                errno = e;  // let the switch below sort out the OS/2 error code.
+            } // if
+        } // else if
+    } // if
+
+    if (info->fd != -1) {
+        if (isReplacing)
+            FIXME("Replacing a file should delete all its EAs, too");
+    } // if
+
+    if (info->fd == -1) {
+        switch (errno) {
+            case EACCES: return ERROR_ACCESS_DENIED;
+            case EDQUOT: return ERROR_CANNOT_MAKE;
+            case EEXIST: return ERROR_CANNOT_MAKE;
+            case EISDIR: return ERROR_ACCESS_DENIED;
+            case EMFILE: return ERROR_TOO_MANY_OPEN_FILES;
+            case ENFILE: return ERROR_TOO_MANY_OPEN_FILES;
+            case ENAMETOOLONG: return ERROR_FILENAME_EXCED_RANGE;
+            case ENOSPC: return ERROR_DISK_FULL;
+            case ENOMEM: return ERROR_NOT_ENOUGH_MEMORY;
+            case ENOENT: return ERROR_FILE_NOT_FOUND;  // !!! FIXME: could be PATH_NOT_FOUND too, depending on circumstances.
+            case ENOTDIR: return ERROR_PATH_NOT_FOUND;
+            case EPERM: return ERROR_ACCESS_DENIED;
+            case EROFS: return ERROR_ACCESS_DENIED;
+            case ETXTBSY: return ERROR_ACCESS_DENIED;
+            default: return ERROR_OPEN_FAILED;  // !!! FIXME: debug logging about missin errno case.
+        } // switch
+        __builtin_unreachable();
+    } // if
+
+    if (isReplacing)
+        *pulAction = FILE_TRUNCATED;
+    else if (existed)
+        *pulAction = FILE_EXISTED;
+    else
+        *pulAction = FILE_CREATED;
+
+    *pHf = hf;
+    return NO_ERROR;
+} // DosOpen
 
 // end of doscalls.c ...
 
