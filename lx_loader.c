@@ -269,11 +269,29 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
 {
     // !!! FIXME: right now, we don't list any environment variables, because they probably don't make sense to drop in (even PATH uses a different separator on Unix).
     // !!! FIXME:  eventually, the environment table looks like this (double-null to terminate list):  var1=a\0var2=b\0var3=c\0\0
-    // The command line, if I'm reading the Open Watcom __OS2Main() implementation correctly, looks like this...
-    //   \0programname\0argv0\0argv1\0argvN\0
-    size_t len = strlen(argv[0]) + 1;
+    // The command line looks like this...
+    //   \0argv0\0argv1 argv2 argvN\0\0
+
+    FIXME("We need to escape cmdline args with spaces or tabs.");
+
+    size_t len = 1;
     for (int i = 0; i < argc; i++) {
-        len += strlen(argv[i]) + 1;
+        int needs_escape = 0;
+        int num_backslashes = 0;
+        for (const char *arg = argv[i]; *arg; arg++) {
+            const char ch = *arg;
+            if ((ch == ' ') || (ch == '\t'))
+                needs_escape = 1;
+            else if ((ch == '\\') || (ch == '\"'))
+                num_backslashes++;
+            len++;
+        } // for
+
+        if (needs_escape) {
+            len += 2 + num_backslashes;
+        } // if
+
+        len++;  // terminator
     }
 
     const char *tmpenv = "IS_2INE=1";
@@ -295,11 +313,32 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
     strcpy(ptr, argv[0]);
     ptr += strlen(argv[0]);
     *(ptr++) = '\0';
-    for (int i = 0; i < argc; i++) {
-        strcpy(ptr, argv[i]);
-        ptr += strlen(argv[i]);
-        *(ptr++) = '\0';
+    for (int i = 1; i < argc; i++) {
+        int needs_escape = 0;
+        for (const char *arg = argv[i]; *arg; arg++) {
+            const char ch = *arg;
+            if ((ch == ' ') || (ch == '\t'))
+                needs_escape = 1;
+        } // for
+
+        if (needs_escape) {
+            *(ptr++) = '"';
+            for (const char *arg = argv[i]; *arg; arg++) {
+                const char ch = *arg;
+                if ((ch == '\\') || (ch == '\n'))
+                    *(ptr++) = '\\';
+                *(ptr++) = ch;
+            } // for
+            *(ptr++) = '"';
+        } else {
+            for (const char *arg = argv[i]; *arg; arg++)
+                *(ptr++) = *arg;
+        } // if
+
+        if (i < (argc-1))
+            *(ptr++) = ' ';
     } // for
+
     *(ptr++) = '\0';
 
     lxmod->env = env;
@@ -1106,8 +1145,8 @@ static inline LxModule *loadLxModuleByModuleName(const char *modname)
 
 int main(int argc, char **argv)
 {
-    if (argc != 2) {
-        fprintf(stderr, "USAGE: %s <program.exe>\n", argv[0]);
+    if (argc < 2) {
+        fprintf(stderr, "USAGE: %s <program.exe> [...programargs...]\n", argv[0]);
         return 1;
     }
 
