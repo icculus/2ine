@@ -164,10 +164,32 @@ struct LxModule
     LxModule *next;  // all loaded modules are in a doubly-linked list.
 };
 
-typedef struct
+#pragma pack(push, 1)
+typedef struct LxTIB2
+{
+    uint32 tib2_ultid;
+    uint32 tib2_ulpri;
+    uint32 tib2_version;
+    uint16 tib2_usMCCount;
+    uint16 tib2_fMCForceFlag;
+} LxTIB2;
+#pragma pack(pop)
+
+typedef struct LxTIB
+{
+    void *tib_pexchain;
+    void *tib_pstack;
+    void *tib_pstacklimit;
+    LxTIB2 *tib_ptib2;
+    uint32 tib_version;
+    uint32 tib_ordinal;
+} LxTIB;
+
+typedef struct LxLoaderState
 {
     LxModule *loaded_modules;
     LxModule *main_module;
+    void (*initOs2Tib)(void *_topOfStack, const size_t stacklen);
 } LxLoaderState;
 
 typedef const LxExport *(*LxNativeModuleInitEntryPoint)(LxLoaderState *lx_state, uint32 *lx_num_exports);

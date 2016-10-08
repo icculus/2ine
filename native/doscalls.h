@@ -42,34 +42,36 @@ enum
     QSV_FOREGROUND_PROCESS
 };
 
+#pragma pack(push, 1)
 typedef struct TIB2
 {
-    uint32 tib2_ultid;
-    uint32 tib2_ulpri;
-    uint32 tib2_version;
-    uint16 tib2_usMCCount;
-    uint16 tib2_fMCForceFlag;
-} TIB2;
+    ULONG tib2_ultid;
+    ULONG tib2_ulpri;
+    ULONG tib2_version;
+    USHORT tib2_usMCCount;
+    USHORT tib2_fMCForceFlag;
+} TIB2, *PTIB2;
+#pragma pack(pop)
 
 typedef struct TIB
 {
-    void *tib_pexchain;
-    void *tib_pstack;
-    void *tib_pstacklimit;
-    TIB2 *tib_ptib2;
-    uint32 tib_version;
-    uint32 tib_ordinal;
+    PVOID tib_pexchain;
+    PVOID tib_pstack;
+    PVOID tib_pstacklimit;
+    PTIB2 tib_ptib2;
+    ULONG tib_version;
+    ULONG tib_ordinal;
 } TIB, *PTIB;
 
 typedef struct PIB
 {
-    uint32 pib_ulpid;
-    uint32 pib_ulppid;
+    ULONG pib_ulpid;
+    ULONG pib_ulppid;
     HMODULE pib_hmte;
-    char *pib_pchcmd;
-    char *pib_pchenv;
-    uint32 pib_flstatus;
-    uint32 pib_ultype;
+    PCHAR pib_pchcmd;
+    PCHAR pib_pchenv;
+    ULONG pib_flstatus;
+    ULONG pib_ultype;
 } PIB, *PPIB;
 
 typedef VOID APIENTRY FNEXITLIST(ULONG);

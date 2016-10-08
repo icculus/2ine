@@ -138,23 +138,20 @@ APIRET DosGetInfoBlocks(PTIB *pptib, PPIB *pppib)
 {
     TRACE_NATIVE("DosGetInfoBlocks(%p, %p)", pptib, pppib);
 
-    // !!! FIXME: this is seriously incomplete.
     if (pptib != NULL) {
-        static __thread TIB tib;
-        static __thread TIB2 tib2;
-        if (tib.tib_ptib2 == NULL) {
-            // new thread, initialize this TIB.
-            const LxModule *lxmod = GLoaderState->main_module;
-            tib.tib_ptib2 = &tib2;
-            tib.tib_pstack = (void *) ((size_t) lxmod->esp);
-            tib.tib_pstacklimit = (void *) (((size_t) lxmod->esp) - lxmod->mmaps[lxmod->lx.esp_object - 1].size);
-        } // if
-        *pptib = &tib;
+        // just read the FS register, since we have to stick it there anyhow...
+        uint8 *ptib2;
+        __asm__ __volatile__ ( "movl %%fs:0xC, %0  \n\t" : "=r" (ptib2) );
+        // we store the TIB2 struct right after the TIB struct on the stack,
+        //  so get the TIB2's linear address from %fs:0xC, then step back
+        //  to the TIB's linear address.
+        *pptib = (PTIB) (ptib2 - sizeof (TIB));
     } // if
 
     if (pppib != NULL) {
         static PIB pib;
         if (pib.pib_ulpid == 0) {
+            // !!! FIXME: this is seriously incomplete.
             pib.pib_hmte = (HMODULE) GLoaderState->main_module;
             pib.pib_ulpid = (uint32) getpid();
             pib.pib_ulppid = (uint32) getppid();

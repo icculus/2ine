@@ -10,6 +10,11 @@
 #include <assert.h>
 #include <dlfcn.h>
 
+// 16-bit selector kernel nonsense...
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <asm/ldt.h>
+
 #include "lx_loader.h"
 
 static LxLoaderState _GLoaderState;
@@ -265,14 +270,70 @@ static void *generateMissingTrampoline(const char *_module, const char *_entry)
     return trampoline;
 } // generateMissingTrampoline
 
+
+// OS/2 threads keep their Thread Information Block at FS:0x0000, so we have
+//  to ask the Linux kernel to screw around with 16-bit selectors on our
+//  behalf so we don't crash out when apps try to access it directly.
+// OS/2 provides a C-callable API to obtain the (32-bit linear!) TIB address
+//  without going directly to the FS register, but lots of programs (including
+//  the EMX runtime) touch the register directly, so we have to deal with it.
+// You must call this once for each thread that will go into LX land, from
+//  that thread, as soon as possible after starting.
+// !!! FIXME: eventually, we'll have a deinit equivalent for the end of threads, too.
+static void initOs2Tib(void *_topOfStack, const size_t stacklen)
+{
+    uint8 *topOfStack = (uint8 *) _topOfStack;
+    const size_t tiblen = (sizeof (LxTIB) + sizeof (LxTIB2));
+    assert(stacklen > tiblen);
+
+    // set aside the first 40 bytes of the thread's stack for
+    //  the Thread Information Block structs (24 for TIB and 16 for TIB2).
+    LxTIB *tib = (LxTIB *) (topOfStack - tiblen);
+    LxTIB2 *tib2 = (LxTIB2 *) (tib + 1);
+    memset(tib, '\0', tiblen);
+
+    FIXME("This is probably 50% wrong");
+    tib->tib_pexchain = NULL;
+    tib->tib_pstack = (void *) topOfStack;
+    tib->tib_pstacklimit = topOfStack - stacklen;
+    tib->tib_ptib2 = tib2;
+    tib->tib_version = 20;  // !!! FIXME
+    tib->tib_ordinal = 79;  // !!! FIXME
+
+    tib2->tib2_ultid = 1;
+    tib2->tib2_ulpri = 512;
+    tib2->tib2_version = 20;
+    tib2->tib2_usMCCount = 0;
+    tib2->tib2_fMCForceFlag = 0;
+
+    // !!! FIXME: I barely know what I'm doing here, this could all be wrong.
+    struct user_desc entry;
+    entry.entry_number = -1;
+    entry.base_addr = (unsigned int) ((size_t)tib);
+    entry.limit = tiblen;
+    entry.seg_32bit = 1;
+    entry.contents = MODIFY_LDT_CONTENTS_DATA;
+    entry.read_exec_only = 0;
+    entry.limit_in_pages = 0;
+    entry.seg_not_present = 0;
+    entry.useable = 1;
+    const long rc = syscall(SYS_set_thread_area, &entry);
+    assert(rc == 0);  FIXME("this can legit fail, though!");
+
+    // I have no idea why this needs the "<< 3 | 3", but it's probably
+    //  specified in the Intel manuals. I got this from looking at how
+    //  Wine does it. I still don't know why.
+    const unsigned int segment = (entry.entry_number << 3) | 3;
+    __asm__ __volatile__ ( "movw %%ax, %%fs  \n\t" : : "a" (segment) );
+} // initOs2Tib
+
+
 static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int argc, char **argv)
 {
     // !!! FIXME: right now, we don't list any environment variables, because they probably don't make sense to drop in (even PATH uses a different separator on Unix).
     // !!! FIXME:  eventually, the environment table looks like this (double-null to terminate list):  var1=a\0var2=b\0var3=c\0\0
     // The command line looks like this...
     //   \0argv0\0argv1 argv2 argvN\0\0
-
-    FIXME("We need to escape cmdline args with spaces or tabs.");
 
     size_t len = 1;
     for (int i = 0; i < argc; i++) {
@@ -344,10 +405,12 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
     lxmod->env = env;
     lxmod->cmd = cmd;
 
+    uint8 *stack = (uint8 *) ((size_t) lxmod->esp);
+    stack -= sizeof (LxTIB) + sizeof (LxTIB2);  // skip the TIB data.
+
     // ...and you pass it the pointer to argv0. This is (at least as far as the docs suggest) appended to the environment table.
     printf("jumping into LX land...! eip=0x%X esp=0x%X\n", (uint) lxmod->eip, (uint) lxmod->esp); fflush(stdout);
 
-    // !!! FIXME: need to set up OS/2 TIB and put it in FS register.
     __asm__ __volatile__ (
         "movl %%esi,%%esp  \n\t"  // use the OS/2 process's stack.
         "pushl %%eax       \n\t"  // cmd
@@ -372,7 +435,7 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
         "pushl %%eax       \n\t"  // call _exit() with whatever is in %eax.
         "call _exit        \n\t"
             : // no outputs
-            : "a" (cmd), "c" (env), "S" (lxmod->esp), "D" (lxmod->eip)
+            : "a" (cmd), "c" (env), "S" (stack), "D" (lxmod->eip)
             : "memory"
     );
 
@@ -381,9 +444,11 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
 
 static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
 {
+    uint8 *stack = (uint8 *) ((size_t) GLoaderState->main_module->esp);
+    stack -= sizeof (LxTIB) + sizeof (LxTIB2);  // skip the TIB data.
+
     printf("jumping into LX land to %s library...! eip=0x%X esp=0x%X\n", isTermination ? "terminate" : "initialize", (uint) lxmod->eip, (uint) GLoaderState->main_module->esp); fflush(stdout);
 
-    // !!! FIXME: need to set up OS/2 TIB and put it in FS register.
     __asm__ __volatile__ (
         "pushal            \n\t"  // save all the current registers.
         "pushfl            \n\t"  // save all the current flags.
@@ -410,7 +475,7 @@ static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
         "popfl             \n\t"  // restore our original flags.
         "popal             \n\t"  // restore our original registers.
             : // no outputs
-            : "a" (isTermination), "S" (GLoaderState->main_module->esp), "D" (lxmod->eip)
+            : "a" (isTermination), "S" (stack), "D" (lxmod->eip)
             : "memory"
     );
 
@@ -852,6 +917,12 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
         } // if
     } // if
 
+    if (!isDLL) {
+        // This needs to be set up now, so it's available to any library
+        //  init code that runs in LX land.
+        initOs2Tib((void *) ((size_t) retval->esp), retval->mmaps[retval->lx.esp_object - 1].size);
+    } // if
+
     // Set up our exports...
     uint32 total_ordinals = 0;
     const uint8 *entryptr = exe + lx->entry_table_offset;
@@ -962,15 +1033,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
             uint8 *ptr = ((uint8 *) retval->mmaps[1].addr) + 28596;
             for (uint32 i = 0; i < 37; i++)
                 *(ptr++) = 0x90; // nop
-
-            // This is a read of the FS register for the TIB, but we need to wire that up still.
-            ptr = ((uint8 *) retval->mmaps[1].addr) + 237;
-            *(ptr++) = 0x31;  // xorl %esi,%esi ...makes next piece of code skip TIB stuff.
-            *(ptr++) = 0xf6;
-            for (uint32 i = 0; i < 14; i++)
-                *(ptr++) = 0x90; // nop
-        }
-
+        } // if
 
         // Now set all the pages of this object to the proper final permissions...
         const int prot = ((obj->object_flags & 0x1) ? PROT_READ : 0) |
@@ -1149,6 +1212,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "USAGE: %s <program.exe> [...programargs...]\n", argv[0]);
         return 1;
     }
+
+    GLoaderState->initOs2Tib = initOs2Tib;
 
     LxModule *lxmod = loadLxModuleByPath(argv[1]);
     if (lxmod) {
