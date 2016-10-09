@@ -411,13 +411,14 @@ APIRET DosSetExceptionHandler(PEXCEPTIONREGISTRATIONRECORD rec)
     return NO_ERROR;
 } // DosSetExceptionHandler
 
-ULONG DosFlatToSel(void)
+ULONG DosFlatToSel(PVOID ptr)
 {
     // this actually passes the arg in eax instead of the stack.
-    uint32 eax = 0;
-    __asm__ __volatile__ ("" : "=a" (eax));
-    TRACE_NATIVE("DosFlatToSel(%p)", (void *) (size_t) eax);
-    return (ULONG) 0x12345678;  // !!! FIXME
+    //uint32 eax = 0;
+    //__asm__ __volatile__ ("" : "=a" (eax));
+    //TRACE_NATIVE("DosFlatToSel(%p)", (void *) (size_t) eax);
+    TRACE_NATIVE("DosFlatToSel(%p)", ptr);
+    return ((ULONG) ((size_t)ptr)) >> 16;  // !!! FIXME
 } // DosFlatToSel
 
 APIRET DosSetSignalExceptionFocus(BOOL32 flag, PULONG pulTimes)
