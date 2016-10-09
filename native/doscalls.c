@@ -11,6 +11,7 @@
 #include <sys/sysinfo.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 
 #include "os2native.h"
 #include "doscalls.h"
@@ -111,11 +112,16 @@ static int initDoscalls(LxLoaderState *lx_state)
 } // initDoscalls
 
 LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
+    LX_NATIVE_EXPORT(DosQueryPathInfo, 223),
     LX_NATIVE_EXPORT(DosQueryHType, 224),
     LX_NATIVE_EXPORT(DosScanEnv, 227),
     LX_NATIVE_EXPORT(DosGetDateTime, 230),
     LX_NATIVE_EXPORT(DosExit, 234),
+    LX_NATIVE_EXPORT(DosSetFilePtr, 256),
+    LX_NATIVE_EXPORT(DosClose, 257),
     LX_NATIVE_EXPORT(DosOpen, 273),
+    LX_NATIVE_EXPORT(DosQueryFileInfo, 279),
+    LX_NATIVE_EXPORT(DosRead, 281),
     LX_NATIVE_EXPORT(DosWrite, 282),
     LX_NATIVE_EXPORT(DosExitList, 296),
     LX_NATIVE_EXPORT(DosAllocMem, 299),
@@ -124,14 +130,36 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
     LX_NATIVE_EXPORT(DosQueryModuleName, 320),
     LX_NATIVE_EXPORT(DosCreateEventSem, 324),
     LX_NATIVE_EXPORT(DosCreateMutexSem, 331),
+    LX_NATIVE_EXPORT(DosRequestMutexSem, 334),
+    LX_NATIVE_EXPORT(DosReleaseMutexSem, 335),
     LX_NATIVE_EXPORT(DosSubSetMem, 344),
     LX_NATIVE_EXPORT(DosSubAllocMem, 345),
     LX_NATIVE_EXPORT(DosQuerySysInfo, 348),
     LX_NATIVE_EXPORT(DosSetExceptionHandler, 354),
     LX_NATIVE_EXPORT(DosSetSignalExceptionFocus, 378),
+    LX_NATIVE_EXPORT(DosEnterMustComplete, 380),
+    LX_NATIVE_EXPORT(DosExitMustComplete, 381),
     LX_NATIVE_EXPORT(DosSetRelMaxFH, 382),
     LX_NATIVE_EXPORT(DosFlatToSel, 425)
 LX_NATIVE_MODULE_INIT_END()
+
+
+static PTIB2 getTib2(void)
+{
+    // just read the FS register, since we have to stick it there anyhow...
+    PTIB2 ptib2;
+    __asm__ __volatile__ ( "movl %%fs:0xC, %0  \n\t" : "=r" (ptib2) );
+    return ptib2;
+} // getTib2
+
+static PTIB getTib(void)
+{
+    // we store the TIB2 struct right after the TIB struct on the stack,
+    //  so get the TIB2's linear address from %fs:0xC, then step back
+    //  to the TIB's linear address.
+    uint8 *ptib2 = (uint8 *) getTib2();
+    return (PTIB) (ptib2 - sizeof (TIB));
+} // getTib
 
 
 APIRET DosGetInfoBlocks(PTIB *pptib, PPIB *pppib)
@@ -139,13 +167,7 @@ APIRET DosGetInfoBlocks(PTIB *pptib, PPIB *pppib)
     TRACE_NATIVE("DosGetInfoBlocks(%p, %p)", pptib, pppib);
 
     if (pptib != NULL) {
-        // just read the FS register, since we have to stick it there anyhow...
-        uint8 *ptib2;
-        __asm__ __volatile__ ( "movl %%fs:0xC, %0  \n\t" : "=r" (ptib2) );
-        // we store the TIB2 struct right after the TIB struct on the stack,
-        //  so get the TIB2's linear address from %fs:0xC, then step back
-        //  to the TIB's linear address.
-        *pptib = (PTIB) (ptib2 - sizeof (TIB));
+        *pptib = getTib();
     } // if
 
     if (pppib != NULL) {
@@ -571,12 +593,12 @@ APIRET DosGetDateTime(PDATETIME pdt)
 // !!! FIXNE:  length can change!
 static int locateOneElement(char *buf)
 {
-    if (access(buf, F_OK))
+    if (access(buf, F_OK) == 0)
         return 1;  // quick rejection: exists in current case.
 
     DIR *dirp;
     char *ptr = strrchr(buf, '/');  // find entry at end of path.
-    if (ptr == NULL) {
+    if ((ptr == NULL) || (ptr == buf)) {
         dirp = opendir("/");
         ptr = buf;
     } else {
@@ -607,7 +629,7 @@ int locatePathCaseInsensitive(char *buf)
     if (*ptr == '\0')
         return 0;  // Uh...I guess that's success?
 
-    if (access(buf, F_OK))
+    if (access(buf, F_OK) == 0)
         return 0;  // quick rejection: exists in current case.
 
     while ( (ptr = strchr(ptr + 1, '/')) != NULL ) {
@@ -771,7 +793,7 @@ APIRET DosOpen(PSZ pszFileName, PHFILE pHf, PULONG pulAction, ULONG cbFile, ULON
         return err;
     } // if
 
-    printf("DosOpen: converted '%s' to '%s'\n", pszFileName, unixpath);
+    if (strcmp(pszFileName, unixpath) != 0) { printf("DosOpen: converted '%s' to '%s'\n", pszFileName, unixpath); }
 
     info->fd = open(unixpath, flags, mode);
 
@@ -839,6 +861,296 @@ APIRET DosOpen(PSZ pszFileName, PHFILE pHf, PULONG pulAction, ULONG cbFile, ULON
     *pHf = hf;
     return NO_ERROR;
 } // DosOpen
+
+APIRET DosRequestMutexSem(HMTX hmtx, ULONG ulTimeout)
+{
+    TRACE_NATIVE("DosRequestMutexSem(%u, %u)", (uint) hmtx, (uint) ulTimeout);
+    FIXME("implement this when we can spin threads");
+    return NO_ERROR;
+} // DosRequestMutexSem
+
+APIRET DosReleaseMutexSem(HMTX hmtx)
+{
+    TRACE_NATIVE("DosReleaseMutexSem(%u)", (uint) hmtx);
+    FIXME("implement this when we can spin threads");
+    return NO_ERROR;
+} // DosReleaseMutexSem
+
+APIRET DosSetFilePtr(HFILE hFile, LONG ib, ULONG method, PULONG ibActual)
+{
+    TRACE_NATIVE("DosSetFilePtr(%u, %d, %u, %p)", (uint) hFile, (int) ib, (uint) method, ibActual);
+
+    int whence;
+    switch (method) {
+        case FILE_BEGIN: whence = SEEK_SET; break;
+        case FILE_CURRENT: whence = SEEK_CUR; break;
+        case FILE_END: whence = SEEK_END; break;
+        default: return ERROR_INVALID_FUNCTION;
+    } // switch
+
+    if ((hFile >= MaxHFiles) || (HFiles[hFile].fd == -1))
+        return ERROR_INVALID_HANDLE;
+
+    const off_t pos = lseek(HFiles[hFile].fd, (off_t) ib, whence);
+    if (pos == -1) {
+        if (errno == EINVAL)
+            return ERROR_NEGATIVE_SEEK;
+        return ERROR_INVALID_FUNCTION;  // !!! FIXME: ?
+    } // if
+
+    if (ibActual)
+        *ibActual = (ULONG) pos;
+
+    return NO_ERROR;
+} // DosSetFilePtr
+
+APIRET DosRead(HFILE hFile, PVOID pBuffer, ULONG cbRead, PULONG pcbActual)
+{
+    TRACE_NATIVE("DosRead(%u, %p, %u, %p)", (uint) hFile, pBuffer, (uint) cbRead, pcbActual);
+
+    if ((hFile >= MaxHFiles) || (HFiles[hFile].fd == -1))
+        return ERROR_INVALID_HANDLE;
+
+    const ssize_t br = read(HFiles[hFile].fd, pBuffer, cbRead);
+    if (br == -1)
+        return ERROR_INVALID_FUNCTION;  // !!! FIXME: ?
+
+    if (pcbActual)
+        *pcbActual = (ULONG) br;
+
+    return NO_ERROR;
+} // DosRead
+
+APIRET DosClose(HFILE hFile)
+{
+    TRACE_NATIVE("DosClose(%u)", (uint) hFile);
+
+    if ((hFile >= MaxHFiles) || (HFiles[hFile].fd == -1))
+        return ERROR_INVALID_HANDLE;
+
+    const int rc = close(HFiles[hFile].fd);
+    if (rc == -1)
+        return ERROR_ACCESS_DENIED;  // !!! FIXME: ?
+
+    HFiles[hFile].fd = -1;
+    HFiles[hFile].type = 0;
+    HFiles[hFile].attr = 0;
+    return NO_ERROR;
+} // DosClose
+
+APIRET DosEnterMustComplete(PULONG pulNesting)
+{
+    TRACE_NATIVE("DosEnterMustComplete(%p)", pulNesting);
+
+    PTIB2 tib2 = getTib2();
+    if (tib2->tib2_usMCCount == 0xFFFF) {
+        return ERROR_NESTING_TOO_DEEP;
+    } else if (tib2->tib2_usMCCount == 0) {
+        FIXME("block signals here");
+    }
+
+    tib2->tib2_usMCCount++;
+
+    if (pulNesting)
+        *pulNesting = tib2->tib2_usMCCount;
+
+    return NO_ERROR;
+} // DosEnterMustComplete
+
+APIRET DosExitMustComplete(PULONG pulNesting)
+{
+    TRACE_NATIVE("DosExitMustComplete(%p)", pulNesting);
+
+    PTIB2 tib2 = getTib2();
+    if (tib2->tib2_usMCCount == 0) {
+        return ERROR_ALREADY_RESET;
+    } else if (tib2->tib2_usMCCount == 1) {
+        FIXME("unblock signals here");
+    }
+
+    tib2->tib2_usMCCount--;
+
+    if (pulNesting)
+        *pulNesting = tib2->tib2_usMCCount;
+
+    return NO_ERROR;
+} // DosExitMustComplete
+
+static void unixTimeToOs2(const time_t unixtime, FDATE *os2date, FTIME *os2time)
+{
+    struct tm lt;
+    localtime_r(&unixtime, &lt);
+    os2date->day = (USHORT) lt.tm_mday;
+    os2date->month = (USHORT) (lt.tm_mon + 1);
+    os2date->year = (USHORT) (lt.tm_year - 80);  // wants years since 1980, apparently.
+    os2time->twosecs = (USHORT) (lt.tm_sec / 2);
+    os2time->minutes = (USHORT) lt.tm_min;
+    os2time->hours = (USHORT) lt.tm_hour;
+} // unixTimeToOs2
+
+static APIRET queryFileInfoStandardFromStat(const struct stat *statbuf, PVOID pInfoBuf, ULONG cbInfoBuf)
+{
+    FILESTATUS3 *st = (FILESTATUS3 *) pInfoBuf;
+    memset(st, '\0', sizeof (*st));
+
+    // we don't store creation date on Unix. OS/2 zeroes out fields that aren't
+    //  appropriate to FAT file systems, but I don't want to risk apps using
+    //  zeroes to decide a file in on a FAT disk and reducing features,
+    //  shrinking filenames to 8.3, etc.
+    st->fdateCreation.day = 1;
+    st->fdateCreation.month = 1;
+    st->fdateCreation.year = 0;  // years since 1980, apparently.
+    st->ftimeCreation.twosecs = 0;
+    st->ftimeCreation.minutes = 0;
+    st->ftimeCreation.hours = 0;
+
+    unixTimeToOs2(statbuf->st_atime, &st->fdateLastAccess, &st->ftimeLastAccess);
+    unixTimeToOs2(statbuf->st_mtime, &st->fdateLastWrite, &st->ftimeLastWrite);
+
+    st->cbFile = (ULONG) statbuf->st_size;
+    st->cbFileAlloc = (ULONG) (statbuf->st_blocks * 512);
+
+    if (S_ISDIR(statbuf->st_mode))
+        st->attrFile |= FILE_DIRECTORY;
+    if (statbuf->st_mode & ~S_IRUSR)  // !!! FIXME: not accurate...?
+        st->attrFile |= FILE_READONLY;
+
+    return NO_ERROR;
+} // queryFileInfoStandardFromStat
+
+static APIRET queryPathInfoStandard(PSZ unixPath, PVOID pInfoBuf, ULONG cbInfoBuf)
+{
+    if (cbInfoBuf < sizeof (FILESTATUS3))
+        return ERROR_BUFFER_OVERFLOW;
+
+    struct stat statbuf;
+    if (stat(unixPath, &statbuf) == -1) {
+        return ERROR_PATH_NOT_FOUND;  // !!! FIXME
+    }
+
+    return queryFileInfoStandardFromStat(&statbuf, pInfoBuf, cbInfoBuf);
+} // queryPathInfoStandard
+
+static APIRET queryPathInfoEaSize(PSZ unixPath, PVOID pInfoBuf, ULONG cbInfoBuf)
+{
+    if (cbInfoBuf < sizeof (FILESTATUS4))
+        return ERROR_BUFFER_OVERFLOW;
+    const APIRET rc = queryPathInfoStandard(unixPath, pInfoBuf, cbInfoBuf);
+    if (rc != NO_ERROR)
+        return rc;
+
+    FILESTATUS4 *st = (FILESTATUS4 *) pInfoBuf;
+    FIXME("write me");
+    st->cbList = 0;
+    return NO_ERROR;
+} // queryPathInfoEaSize
+
+static APIRET queryPathInfoFullName(PSZ unixPath, PVOID pInfoBuf, ULONG cbInfoBuf)
+{
+    char *real = realpath(unixPath, NULL);
+    if (real == NULL)
+        return ERROR_NOT_ENOUGH_MEMORY;  // !!! FIXME: no
+
+    if ((strlen(real) + 3) < cbInfoBuf) {
+        free(real);
+        return ERROR_BUFFER_OVERFLOW;
+    } // if
+
+    char *dst = (char *) pInfoBuf;
+    *(dst++) = 'C';
+    *(dst++) = ':';
+    strcpy(dst, real);
+    free(real);
+
+    while (*dst) {
+        if (*dst == '/')
+            *dst = '\\';
+        dst++;
+    } // while
+
+    return NO_ERROR;
+} // queryPathInfoFullName
+
+static APIRET queryPathInfoEasFromList(PSZ unixPath, PVOID pInfoBuf, ULONG cbInfoBuf)
+{
+    FIXME("write me");
+    return ERROR_INVALID_LEVEL;
+} // queryPathInfoEasFromList
+
+static APIRET queryPathInfo(PSZ unixPath, ULONG ulInfoLevel, PVOID pInfoBuf, ULONG cbInfoBuf)
+{
+    switch (ulInfoLevel) {
+        case FIL_STANDARD: return queryPathInfoStandard(unixPath, pInfoBuf, cbInfoBuf);
+        case FIL_QUERYEASIZE: return queryPathInfoEaSize(unixPath, pInfoBuf, cbInfoBuf);
+        case FIL_QUERYEASFROMLIST: return queryPathInfoEasFromList(unixPath, pInfoBuf, cbInfoBuf);
+        case FIL_QUERYFULLNAME: return queryPathInfoFullName(unixPath, pInfoBuf, cbInfoBuf);
+        default: break;
+    } // switch
+
+    return ERROR_INVALID_LEVEL;
+} // queryPathInfo
+
+APIRET DosQueryPathInfo(PSZ pszPathName, ULONG ulInfoLevel, PVOID pInfoBuf, ULONG cbInfoBuf)
+{
+    TRACE_NATIVE("DosQueryPathInfo('%s', %u, %p, %u)", pszPathName, (uint) ulInfoLevel, pInfoBuf, (uint) cbInfoBuf);
+
+    APIRET err = NO_ERROR;
+    char *unixPath = makeUnixPath(pszPathName, &err);
+    if (!unixPath)
+        return err;
+    err = queryPathInfo(unixPath, ulInfoLevel, pInfoBuf, cbInfoBuf);
+    free(unixPath);
+    return err;
+} // DosQueryPathInfo
+
+static APIRET queryFileInfoStandard(const struct stat *statbuf, PVOID pInfoBuf, ULONG cbInfoBuf)
+{
+    if (cbInfoBuf < sizeof (FILESTATUS3))
+        return ERROR_BUFFER_OVERFLOW;
+    return queryFileInfoStandardFromStat(statbuf, pInfoBuf, cbInfoBuf);
+} // queryFileInfoStandard
+
+static APIRET queryFileInfoEaSize(const struct stat *statbuf, PVOID pInfoBuf, ULONG cbInfoBuf)
+{
+    if (cbInfoBuf < sizeof (FILESTATUS4))
+        return ERROR_BUFFER_OVERFLOW;
+    const APIRET rc = queryFileInfoStandard(statbuf, pInfoBuf, cbInfoBuf);
+    if (rc != NO_ERROR)
+        return rc;
+
+    FILESTATUS4 *st = (FILESTATUS4 *) pInfoBuf;
+    FIXME("write me");
+    st->cbList = 0;
+    return NO_ERROR;
+} // queryFileInfoEaSize
+
+static APIRET queryFileInfoEasFromList(const struct stat *statbuf, PVOID pInfoBuf, ULONG cbInfoBuf)
+{
+    FIXME("write me");
+    return ERROR_INVALID_LEVEL;
+} // queryFileInfoEasFromList
+
+
+APIRET DosQueryFileInfo(HFILE hf, ULONG ulInfoLevel, PVOID pInfo, ULONG cbInfoBuf)
+{
+    TRACE_NATIVE("DosQueryFileInfo(%u, %u, %p, %u)", (uint) hf, (uint) ulInfoLevel, pInfo, (uint) cbInfoBuf);
+
+    if ((hf >= MaxHFiles) || (HFiles[hf].fd == -1))
+        return ERROR_INVALID_HANDLE;
+
+    struct stat statbuf;
+    if (fstat(HFiles[hf].fd, &statbuf) == -1)
+        return ERROR_INVALID_HANDLE;  // !!! FIXME: ...?
+
+    switch (ulInfoLevel) {
+        case FIL_STANDARD: return queryFileInfoStandard(&statbuf, pInfo, cbInfoBuf);
+        case FIL_QUERYEASIZE: return queryFileInfoEaSize(&statbuf, pInfo, cbInfoBuf);
+        case FIL_QUERYEASFROMLIST: return queryFileInfoEasFromList(&statbuf, pInfo, cbInfoBuf);
+        default: break;
+    } // switch
+
+    return ERROR_INVALID_LEVEL;
+} // DosQueryFileInfo
 
 // end of doscalls.c ...
 

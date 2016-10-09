@@ -14,6 +14,7 @@ typedef struct COUNTRYCODE
 } COUNTRYCODE, *PCOUNTRYCODE;
 
 APIRET OS2API DosQueryDBCSEnv(ULONG cb, PCOUNTRYCODE pcc, PCHAR pBuf);
+APIRET OS2API DosMapCase(ULONG cb, PCOUNTRYCODE pcc, PCHAR pch);
 
 #ifdef __cplusplus
 }

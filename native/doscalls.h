@@ -166,6 +166,61 @@ enum
     OPEN_FLAGS_PROTECTED_HANDLE = 0x40000000
 };
 
+enum
+{
+    FILE_BEGIN,
+    FILE_CURRENT,
+    FILE_END
+};
+
+enum
+{
+    FIL_STANDARD = 1,
+    FIL_QUERYEASIZE = 2,
+    FIL_QUERYEASFROMLIST = 3,
+    FIL_QUERYFULLNAME = 5
+};
+
+typedef struct
+{
+    USHORT day : 5;
+    USHORT month : 4;
+    USHORT year : 7;
+} FDATE, *PFDATE;
+
+typedef struct
+{
+    USHORT twosecs : 5;
+    USHORT minutes : 6;
+    USHORT hours : 5;
+} FTIME, *PFTIME;
+
+typedef struct
+{
+    FDATE fdateCreation;
+    FTIME ftimeCreation;
+    FDATE fdateLastAccess;
+    FTIME ftimeLastAccess;
+    FDATE fdateLastWrite;
+    FTIME ftimeLastWrite;
+    ULONG cbFile;
+    ULONG cbFileAlloc;
+    ULONG attrFile;
+} FILESTATUS3, *PFILESTATUS3;
+
+typedef struct
+{
+    FDATE fdateCreation;
+    FTIME ftimeCreation;
+    FDATE fdateLastAccess;
+    FTIME ftimeLastAccess;
+    FDATE fdateLastWrite;
+    FTIME ftimeLastWrite;
+    ULONG cbFile;
+    ULONG cbFileAlloc;
+    ULONG attrFile;
+    ULONG cbList;
+} FILESTATUS4, *PFILESTATUS4;
 
 // !!! FIXME: these should probably get sorted alphabetically and/or grouped
 // !!! FIXME:  into areas of functionality, but for now, I'm just listing them
@@ -191,6 +246,15 @@ APIRET OS2API DosQueryHType(HFILE hFile, PULONG pType, PULONG pAttr);
 APIRET OS2API DosSetMem(PVOID pb, ULONG cb, ULONG flag);
 APIRET OS2API DosGetDateTime(PDATETIME pdt);
 APIRET OS2API DosOpen(PSZ pszFileName, PHFILE pHf, PULONG pulAction, ULONG cbFile, ULONG ulAttribute, ULONG fsOpenFlags, ULONG fsOpenMode, PEAOP2 peaop2);
+APIRET OS2API DosRequestMutexSem(HMTX hmtx, ULONG ulTimeout);
+APIRET OS2API DosReleaseMutexSem(HMTX hmtx);
+APIRET OS2API DosSetFilePtr(HFILE hFile, LONG ib, ULONG method, PULONG ibActual);
+APIRET OS2API DosRead(HFILE hFile, PVOID pBuffer, ULONG cbRead, PULONG pcbActual);
+APIRET OS2API DosClose(HFILE hFile);
+APIRET OS2API DosEnterMustComplete(PULONG pulNesting);
+APIRET OS2API DosExitMustComplete(PULONG pulNesting);
+APIRET OS2API DosQueryPathInfo(PSZ pszPathName, ULONG ulInfoLevel, PVOID pInfoBuf, ULONG cbInfoBuf);
+APIRET OS2API DosQueryFileInfo(HFILE hf, ULONG ulInfoLevel, PVOID pInfo, ULONG cbInfoBuf);
 
 #ifdef __cplusplus
 }
