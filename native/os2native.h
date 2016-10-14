@@ -11,8 +11,8 @@
 #include "os2errors.h"
 #include "../lx_loader.h"
 
-#if 1
-#define TRACE_NATIVE(...) do { printf("2INE TRACE: "); printf(__VA_ARGS__); printf(";\n"); } while (0)
+#if 0
+#define TRACE_NATIVE(...) do { fprintf(stderr, "2INE TRACE [%lu]: ", (unsigned long) pthread_self()); fprintf(stderr, __VA_ARGS__); fprintf(stderr, ";\n"); } while (0)
 #else
 #define TRACE_NATIVE(...) do {} while (0)
 #endif

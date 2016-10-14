@@ -441,7 +441,7 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
     stack -= sizeof (LxTIB) + sizeof (LxTIB2);  // skip the TIB data.
 
     // ...and you pass it the pointer to argv0. This is (at least as far as the docs suggest) appended to the environment table.
-    printf("jumping into LX land...! eip=0x%X esp=0x%X\n", (uint) lxmod->eip, (uint) lxmod->esp); fflush(stdout);
+    //fprintf(stderr, "jumping into LX land...! eip=0x%X esp=0x%X\n", (uint) lxmod->eip, (uint) lxmod->esp); fflush(stderr);
 
     __asm__ __volatile__ (
         "movl %%esi,%%esp  \n\t"  // use the OS/2 process's stack.
@@ -479,7 +479,7 @@ static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
     uint8 *stack = (uint8 *) ((size_t) GLoaderState->main_module->esp);
     stack -= sizeof (LxTIB) + sizeof (LxTIB2);  // skip the TIB data.
 
-    printf("jumping into LX land to %s library...! eip=0x%X esp=0x%X\n", isTermination ? "terminate" : "initialize", (uint) lxmod->eip, (uint) GLoaderState->main_module->esp); fflush(stdout);
+    //fprintf(stderr, "jumping into LX land to %s library...! eip=0x%X esp=0x%X\n", isTermination ? "terminate" : "initialize", (uint) lxmod->eip, (uint) GLoaderState->main_module->esp); fflush(stderr);
 
     __asm__ __volatile__ (
         "pushal            \n\t"  // save all the current registers.
@@ -512,7 +512,7 @@ static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
     );
 
     // !!! FIXME: this entry point returns a result...do we abort if it reports error?
-    printf("...survived time in LX land!\n"); fflush(stdout);
+    //fprintf(stderr, "...survived time in LX land!\n"); fflush(stderr);
 } // runLxLibraryInitOrTerm
 
 static inline void runLxLibraryInit(LxModule *lxmod) { runLxLibraryInitOrTerm(lxmod, 0); }
@@ -869,7 +869,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
         void *mmapaddr = mmap(base, vsize, PROT_READ|PROT_WRITE, mmapflags, -1, 0);
         // we'll mprotect() these pages to the proper permissions later.
 
-        printf("mmap(%p, %u, RW-, ANON|PRIVATE%s, -1, 0) == %p\n", base, (uint) vsize, isDLL ? "" : "|FIXED", mmapaddr);
+        //fprintf(stderr, "mmap(%p, %u, RW-, ANON|PRIVATE%s, -1, 0) == %p\n", base, (uint) vsize, isDLL ? "" : "|FIXED", mmapaddr);
 
         if (mmapaddr == ((void *) MAP_FAILED)) {
             fprintf(stderr, "mmap(%p, %u, RW-, ANON|PRIVATE%s, -1, 0) failed (%d): %s\n",
@@ -1117,7 +1117,7 @@ loadlx_failed:
 
 static LxModule *loadLxModuleByPathInternal(const char *fname, const int dependency_tree_depth)
 {
-    const char *what = NULL;
+    const char *what = NULL; (void) what;
     uint8 *module = NULL;
     uint32 modulelen = 0;
     FILE *io = NULL;
@@ -1141,7 +1141,7 @@ static LxModule *loadLxModuleByPathInternal(const char *fname, const int depende
     return retval;
 
 loadmod_failed:
-    fprintf(stderr, "%s failure on '%s: %s'\n", what, fname, strerror(errno));
+    //fprintf(stderr, "%s failure on '%s: %s'\n", what, fname, strerror(errno));
     if (io)
         fclose(io);
     free(module);
@@ -1189,7 +1189,7 @@ static LxModule *loadNativeModule(const char *fname, const char *modname)
     retval->num_exports = num_exports;
     retval->initialized = 1;
 
-    printf("Loaded native module '%s' (%u exports).\n", fname, (uint) num_exports);
+    //fprintf(stderr, "Loaded native module '%s' (%u exports).\n", fname, (uint) num_exports);
 
     return retval;
 

@@ -30,7 +30,7 @@ typedef unsigned int uint;
     } while (0)
 #endif
 
-#if 1
+#if 0
 #ifndef STUBBED
 #define STUBBED(x) _STUBBED(x, "STUBBED")
 #endif

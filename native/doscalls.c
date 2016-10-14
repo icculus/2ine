@@ -958,7 +958,7 @@ APIRET DosOpen(PSZ pszFileName, PHFILE pHf, PULONG pulAction, ULONG cbFile, ULON
         return err;
     } // if
 
-    if (strcmp(pszFileName, unixpath) != 0) { fprintf(stderr, "DosOpen: converted '%s' to '%s'\n", pszFileName, unixpath); }
+    //if (strcmp(pszFileName, unixpath) != 0) { fprintf(stderr, "DosOpen: converted '%s' to '%s'\n", pszFileName, unixpath); }
 
     int fd = open(unixpath, flags, mode);
 
