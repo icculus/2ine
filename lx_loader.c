@@ -1141,7 +1141,7 @@ static LxModule *loadLxModuleByPathInternal(const char *fname, const int depende
     return retval;
 
 loadmod_failed:
-    //fprintf(stderr, "%s failure on '%s: %s'\n", what, fname, strerror(errno));
+    fprintf(stderr, "%s failure on '%s: %s'\n", what, fname, strerror(errno));
     if (io)
         fclose(io);
     free(module);
@@ -1214,7 +1214,11 @@ static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int
     // !!! FIXME: decide the right path to the file, or if it's a native replacement library.
     char fname[256];
     snprintf(fname, sizeof (fname), "%s.dll", modname);
-    LxModule *retval = loadLxModuleByPathInternal(fname, dependency_tree_depth);
+
+    LxModule *retval = NULL;
+    if (access(fname, F_OK) == 0)
+        retval = loadLxModuleByPathInternal(fname, dependency_tree_depth);
+
     if (!retval) {
         snprintf(fname, sizeof (fname), "./lib%s.so", modname);
         for (char *ptr = fname; *ptr; ptr++) {
