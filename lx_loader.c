@@ -9,6 +9,7 @@
 #include <sys/mman.h>
 #include <assert.h>
 #include <dlfcn.h>
+#include <pthread.h>
 
 // 16-bit selector kernel nonsense...
 #include <sys/syscall.h>
@@ -279,8 +280,7 @@ static void *generateMissingTrampoline(const char *_module, const char *_entry)
 //  the EMX runtime) touch the register directly, so we have to deal with it.
 // You must call this once for each thread that will go into LX land, from
 //  that thread, as soon as possible after starting.
-// !!! FIXME: eventually, we'll have a deinit equivalent for the end of threads, too.
-static void initOs2Tib(void *_topOfStack, const size_t stacklen)
+static uint16 initOs2Tib(void *_topOfStack, const size_t stacklen, const uint32 tid)
 {
     uint8 *topOfStack = (uint8 *) _topOfStack;
     const size_t tiblen = (sizeof (LxTIB) + sizeof (LxTIB2));
@@ -300,7 +300,7 @@ static void initOs2Tib(void *_topOfStack, const size_t stacklen)
     tib->tib_version = 20;  // !!! FIXME
     tib->tib_ordinal = 79;  // !!! FIXME
 
-    tib2->tib2_ultid = 1;
+    tib2->tib2_ultid = tid;
     tib2->tib2_ulpri = 512;
     tib2->tib2_version = 20;
     tib2->tib2_usMCCount = 0;
@@ -325,15 +325,27 @@ static void initOs2Tib(void *_topOfStack, const size_t stacklen)
     //  Wine does it. I still don't know why.
     const unsigned int segment = (entry.entry_number << 3) | 3;
     __asm__ __volatile__ ( "movw %%ax, %%fs  \n\t" : : "a" (segment) );
+    return (uint16) segment;
 } // initOs2Tib
 
-
-static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int argc, char **argv)
+static void deinitOs2Tib(const uint16 selector)
 {
-    // !!! FIXME: right now, we don't list any environment variables, because they probably don't make sense to drop in (even PATH uses a different separator on Unix).
-    // !!! FIXME:  eventually, the environment table looks like this (double-null to terminate list):  var1=a\0var2=b\0var3=c\0\0
-    // The command line looks like this...
-    //   \0argv0\0argv1 argv2 argvN\0\0
+    // !!! FIXME: I barely know what I'm doing here, this could all be wrong.
+    struct user_desc entry;
+    memset(&entry, '\0', sizeof (entry));
+    entry.entry_number = selector;
+    entry.read_exec_only = 1;
+    entry.seg_not_present = 1;
+
+    const long rc = syscall(SYS_set_thread_area, &entry);
+    assert(rc == 0);  FIXME("this can legit fail, though!");
+} // deinitOs2Tib
+
+
+static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int argc, char **argv, char **envp)
+{
+    // Eventually, the environment table looks like this (double-null to terminate list):  var1=a\0var2=b\0var3=c\0\0
+    // The command line looks like this: \0argv0\0argv1 argv2 argvN\0\0
 
     size_t len = 1;
     for (int i = 0; i < argc; i++) {
@@ -353,11 +365,20 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
         } // if
 
         len++;  // terminator
-    }
+    } // for
 
-    const char *tmpenv = "IS_2INE=1";
-    const size_t envlen = strlen(tmpenv);
-    len += envlen;
+    const char *default_os2path = "PATH=C:\\home\\icculus\\Dropbox\\emx\\bin;C:\\home\\icculus";  // !!! FIXME: noooooope.
+    for (int i = 0; envp[i]; i++) {
+        const char *str = envp[i];
+        if (strncmp(str, "PATH=", 5) == 0) {
+            if (!GLoaderState->subprocess)
+                str = default_os2path;
+        } else if (strncmp(str, "IS_2INE=", 8) == 0) {
+            continue;
+        } // if
+        len += strlen(str) + 1;
+    } // for
+
     len += 4;  // null terminators.
 
     char *env = (char *) malloc(len);
@@ -366,10 +387,21 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
         exit(1);
     } // if
 
-    strcpy(env, tmpenv);
-    char *ptr = env + envlen;
+    char *ptr = env;
+    for (int i = 0; envp[i]; i++) {
+        const char *str = envp[i];
+        if (strncmp(str, "PATH=", 5) == 0) {
+            if (!GLoaderState->subprocess)
+                str = default_os2path;
+        } else if (strncmp(str, "IS_2INE=", 8) == 0) {
+            continue;
+        } // if
+
+        strcpy(ptr, str);
+        ptr += strlen(str) + 1;
+    }
     *(ptr++) = '\0';
-    *(ptr++) = '\0';
+
     char *cmd = ptr;
     strcpy(ptr, argv[0]);
     ptr += strlen(argv[0]);
@@ -920,7 +952,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
     if (!isDLL) {
         // This needs to be set up now, so it's available to any library
         //  init code that runs in LX land.
-        initOs2Tib((void *) ((size_t) retval->esp), retval->mmaps[retval->lx.esp_object - 1].size);
+        initOs2Tib((void *) ((size_t) retval->esp), retval->mmaps[retval->lx.esp_object - 1].size, 0);
     } // if
 
     // Set up our exports...
@@ -1137,8 +1169,10 @@ static LxModule *loadNativeModule(const char *fname, const char *modname)
 
     // !!! FIXME: mutex this.
     lib = dlopen(fname, RTLD_LOCAL | RTLD_NOW);
-    if (lib == NULL)
+    if (lib == NULL) {
+        fprintf(stderr, "dlopen('%s') failed: %s\n", fname, dlerror());
         goto loadnative_failed;
+    } // if
 
     fn = (LxNativeModuleInitEntryPoint) dlsym(lib, "lxNativeModuleInit");
     if (!fn)
@@ -1206,23 +1240,31 @@ static inline LxModule *loadLxModuleByModuleName(const char *modname)
     return loadLxModuleByModuleNameInternal(modname, 0);
 } // loadLxModuleByModuleName
 
-int main(int argc, char **argv)
+int main(int argc, char **argv, char **envp)
 {
     if (argc < 2) {
         fprintf(stderr, "USAGE: %s <program.exe> [...programargs...]\n", argv[0]);
         return 1;
     }
 
+    const char *envr = getenv("IS_2INE");
+    GLoaderState->subprocess = (envr != NULL);
     GLoaderState->initOs2Tib = initOs2Tib;
+    GLoaderState->deinitOs2Tib = deinitOs2Tib;
 
-    LxModule *lxmod = loadLxModuleByPath(argv[1]);
-    if (lxmod) {
+    LxModule *lxmod = loadLxModuleByPath(envr ? envr : argv[1]);
+    if (!lxmod) {
+        return 1;
+    }
+
+    // standalone, drop argv[0]. As a subprocess, keep it.
+    if (!GLoaderState->subprocess) {
         argc--;
         argv++;
-        runLxModule(lxmod, argc, argv);
     } // if
+    runLxModule(lxmod, argc, argv, envp);
 
-    return 0;
+    return 1;  // you shouldn't hit this, but if you do, report failure.
 } // main
 
 // end of lx_loader.c ...

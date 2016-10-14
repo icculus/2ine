@@ -173,7 +173,6 @@ typedef struct LxTIB2
     uint16 tib2_usMCCount;
     uint16 tib2_fMCForceFlag;
 } LxTIB2;
-#pragma pack(pop)
 
 typedef struct LxTIB
 {
@@ -184,12 +183,15 @@ typedef struct LxTIB
     uint32 tib_version;
     uint32 tib_ordinal;
 } LxTIB;
+#pragma pack(pop)
 
 typedef struct LxLoaderState
 {
     LxModule *loaded_modules;
     LxModule *main_module;
-    void (*initOs2Tib)(void *_topOfStack, const size_t stacklen);
+    int subprocess;
+    uint16 (*initOs2Tib)(void *_topOfStack, const size_t stacklen, const uint32 tid);
+    void (*deinitOs2Tib)(const uint16 selector);
 } LxLoaderState;
 
 typedef const LxExport *(*LxNativeModuleInitEntryPoint)(LxLoaderState *lx_state, uint32 *lx_num_exports);

@@ -52,6 +52,8 @@ foreach(_I doscalls;msg;nls;quecalls;viocalls;kbdcalls;sesmgr)
     set_target_properties(${_I} PROPERTIES LINK_FLAGS "-m32 -ggdb3")
 endforeach()
 
+target_link_libraries(doscalls "pthread")
+
 add_executable(lx_dump lx_dump.c)
 
 add_executable(lx_loader lx_loader.c)

@@ -33,11 +33,21 @@ typedef uint16_t USHORT, *PUSHORT;
 typedef int32_t LONG, *PLONG;
 typedef uint32_t ULONG, *PULONG;
 typedef uint32_t BOOL32, *PBOOL32;
-typedef uint32_t HANDLE, *PHANDLE;
+typedef uint8_t BYTE, *PBYTE;
+
+// !!! FIXME: HANDLE should either be 64-bits on x86_64, or we need to
+// !!! FIXME:  refactor and mutex a bunch of stuff...if it has to be a 32-bit
+// !!! FIXME:  int, it needs to be an index into a resizable array, but at the
+// !!! FIXME:  native word size, these handles can just be pointers cast to ints.
+typedef uint16_t SHANDLE, *PSHANDLE;
+typedef uint32_t LHANDLE, *PLHANDLE;
+typedef LHANDLE HANDLE, *PHANDLE;
 typedef HANDLE HMODULE, *PHMODULE;
 typedef HANDLE HFILE, *PHFILE;
 typedef HANDLE HEV, *PHEV;
 typedef HANDLE HMTX, *PHMTX;
+typedef HANDLE PID, *PPID;
+typedef HANDLE TID, *PTID;
 typedef PCHAR PSZ;
 
 #ifdef __cplusplus

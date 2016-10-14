@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <pthread.h>
 #include <errno.h>
 
 #include "os2types.h"

@@ -51,7 +51,6 @@ typedef struct TIB2
     USHORT tib2_usMCCount;
     USHORT tib2_fMCForceFlag;
 } TIB2, *PTIB2;
-#pragma pack(pop)
 
 typedef struct TIB
 {
@@ -62,6 +61,7 @@ typedef struct TIB
     ULONG tib_version;
     ULONG tib_ordinal;
 } TIB, *PTIB;
+#pragma pack(pop)
 
 typedef struct PIB
 {
@@ -222,6 +222,74 @@ typedef struct
     ULONG cbList;
 } FILESTATUS4, *PFILESTATUS4;
 
+enum
+{
+    CREATE_READY,
+    CREATE_SUSPENDED
+};
+
+enum
+{
+    STACK_SPARSE = 0,
+    STACK_COMMITTED = 2
+};
+
+typedef VOID APIENTRY FNTHREAD(ULONG);
+typedef FNTHREAD *PFNTHREAD;
+
+typedef struct
+{
+    ULONG codeTerminate;
+    ULONG codeResult;
+} RESULTCODES, *PRESULTCODES;
+
+enum
+{
+    EXEC_SYNC,
+    EXEC_ASYNC,
+    EXEC_ASYNCRESULT,
+    EXEC_TRACE,
+    EXEC_BACKGROUND,
+    EXEC_LOAD,
+    EXEC_ASYNCRESULTDB
+};
+
+
+enum
+{
+    DC_SEM_SHARED = 1
+};
+
+enum
+{
+    DCMW_WAIT_ANY = (1<<1),
+    DCMW_WAIT_ALL = (1<<2)
+};
+
+enum
+{
+    SEM_INDEFINITE_WAIT = -1,
+    SEM_IMMEDIATE_RETURN = 0
+};
+
+enum
+{
+    DCWW_WAIT,
+    DCWW_NOWAIT
+};
+
+enum
+{
+    DCWA_PROCESS,
+    DCWA_PROCESSTREE
+};
+
+enum
+{
+   DSPI_WRTTHRU = 0x10,
+};
+
+
 // !!! FIXME: these should probably get sorted alphabetically and/or grouped
 // !!! FIXME:  into areas of functionality, but for now, I'm just listing them
 // !!! FIXME:  in the order I implemented them to get things running.
@@ -255,6 +323,22 @@ APIRET OS2API DosEnterMustComplete(PULONG pulNesting);
 APIRET OS2API DosExitMustComplete(PULONG pulNesting);
 APIRET OS2API DosQueryPathInfo(PSZ pszPathName, ULONG ulInfoLevel, PVOID pInfoBuf, ULONG cbInfoBuf);
 APIRET OS2API DosQueryFileInfo(HFILE hf, ULONG ulInfoLevel, PVOID pInfo, ULONG cbInfoBuf);
+APIRET OS2API DosQueryFileInfo(HFILE hf, ULONG ulInfoLevel, PVOID pInfo, ULONG cbInfoBuf);
+APIRET OS2API DosCreateThread(PTID ptid, PFNTHREAD pfn, ULONG param, ULONG flag, ULONG cbStack);
+APIRET OS2API DosExecPgm(PCHAR pObjname, LONG cbObjname, ULONG execFlag, PSZ pArg, PSZ pEnv, PRESULTCODES pRes, PSZ pName);
+APIRET OS2API DosResetEventSem(HEV hev, PULONG pulPostCt);
+APIRET OS2API DosPostEventSem(HEV hev);
+APIRET OS2API DosCloseEventSem(HEV hev);
+APIRET OS2API DosWaitEventSem(HEV hev, ULONG ulTimeout);
+APIRET OS2API DosQueryEventSem(HEV hev, PULONG pulPostCt);
+APIRET OS2API DosFreeMem(PVOID pb);
+APIRET OS2API DosWaitChild(ULONG action, ULONG option, PRESULTCODES pres, PPID ppid, PID pid);
+APIRET OS2API DosWaitThread(PTID ptid, ULONG option);
+APIRET OS2API DosSleep(ULONG msec);
+APIRET OS2API DosSubFreeMem(PVOID pbBase, PVOID pb, ULONG cb);
+APIRET OS2API DosDelete(PSZ pszFile);
+APIRET OS2API DosQueryCurrentDir(ULONG disknum, PBYTE pBuf, PULONG pcbBuf);
+APIRET OS2API DosSetPathInfo(PSZ pszPathName, ULONG ulInfoLevel, PVOID pInfoBuf, ULONG cbInfoBuf, ULONG flOptions);
 
 #ifdef __cplusplus
 }

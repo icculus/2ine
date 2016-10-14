@@ -6,7 +6,9 @@
 #include <time.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/sysinfo.h>
 #include <sys/time.h>
@@ -17,6 +19,8 @@
 #include "doscalls.h"
 
 static LxLoaderState *GLoaderState = NULL;
+
+static pthread_mutex_t GMutexDosCalls;
 
 typedef struct ExitListItem
 {
@@ -62,22 +66,58 @@ typedef struct HFileInfo
 static HFileInfo *HFiles = NULL;
 static uint32 MaxHFiles = 0;
 
+typedef struct Thread
+{
+    pthread_t thread;
+    size_t stacklen;
+    PFNTHREAD fn;
+    ULONG fnarg;
+    struct Thread *prev;
+    struct Thread *next;
+} Thread;
+
+static Thread *GDeadThreads = NULL;
+
+
+typedef struct
+{
+    pthread_mutex_t mutex;
+    pthread_cond_t condition;
+    volatile int posted;
+    volatile int waiting;
+} EventSem;
+
 LX_NATIVE_MODULE_DEINIT({
     ExitListItem *next = GExitList;
     GExitList = NULL;
+
     for (ExitListItem *item = next; item; item = next) {
         next = item->next;
         free(item);
     } // for
+
+    for (uint32 i = 0; i < MaxHFiles; i++) {
+        if (HFiles[i].fd != -1)
+            close(HFiles[i].fd);
+    } // for
     free(HFiles);
     HFiles = NULL;
     MaxHFiles = 0;
+
+    pthread_mutex_destroy(&GMutexDosCalls);
+
     GLoaderState = NULL;
 })
 
 static int initDoscalls(LxLoaderState *lx_state)
 {
     GLoaderState = lx_state;
+
+    if (pthread_mutex_init(&GMutexDosCalls, NULL) == -1) {
+        fprintf(stderr, "pthread_mutex_init failed!\n");
+        return 0;
+    } // if
+
     MaxHFiles = 20;  // seems to be OS/2's default.
     HFiles = (HFileInfo *) malloc(sizeof (HFileInfo) * MaxHFiles);
     if (!HFiles) {
@@ -112,6 +152,7 @@ static int initDoscalls(LxLoaderState *lx_state)
 } // initDoscalls
 
 LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
+    LX_NATIVE_EXPORT(DosSetPathInfo, 219),
     LX_NATIVE_EXPORT(DosQueryPathInfo, 223),
     LX_NATIVE_EXPORT(DosQueryHType, 224),
     LX_NATIVE_EXPORT(DosScanEnv, 227),
@@ -119,21 +160,33 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
     LX_NATIVE_EXPORT(DosExit, 234),
     LX_NATIVE_EXPORT(DosSetFilePtr, 256),
     LX_NATIVE_EXPORT(DosClose, 257),
+    LX_NATIVE_EXPORT(DosDelete, 259),
     LX_NATIVE_EXPORT(DosOpen, 273),
+    LX_NATIVE_EXPORT(DosQueryCurrentDir, 274),
     LX_NATIVE_EXPORT(DosQueryFileInfo, 279),
+    LX_NATIVE_EXPORT(DosWaitChild, 280),
     LX_NATIVE_EXPORT(DosRead, 281),
     LX_NATIVE_EXPORT(DosWrite, 282),
+    LX_NATIVE_EXPORT(DosExecPgm, 283),
     LX_NATIVE_EXPORT(DosExitList, 296),
     LX_NATIVE_EXPORT(DosAllocMem, 299),
+    LX_NATIVE_EXPORT(DosFreeMem, 304),
     LX_NATIVE_EXPORT(DosSetMem, 305),
+    LX_NATIVE_EXPORT(DosCreateThread, 311),
     LX_NATIVE_EXPORT(DosGetInfoBlocks, 312),
     LX_NATIVE_EXPORT(DosQueryModuleName, 320),
     LX_NATIVE_EXPORT(DosCreateEventSem, 324),
+    LX_NATIVE_EXPORT(DosCloseEventSem, 326),
+    LX_NATIVE_EXPORT(DosResetEventSem, 327),
+    LX_NATIVE_EXPORT(DosPostEventSem, 328),
+    LX_NATIVE_EXPORT(DosWaitEventSem, 329),
+    LX_NATIVE_EXPORT(DosQueryEventSem, 330),
     LX_NATIVE_EXPORT(DosCreateMutexSem, 331),
     LX_NATIVE_EXPORT(DosRequestMutexSem, 334),
     LX_NATIVE_EXPORT(DosReleaseMutexSem, 335),
     LX_NATIVE_EXPORT(DosSubSetMem, 344),
     LX_NATIVE_EXPORT(DosSubAllocMem, 345),
+    LX_NATIVE_EXPORT(DosSubFreeMem, 346),
     LX_NATIVE_EXPORT(DosQuerySysInfo, 348),
     LX_NATIVE_EXPORT(DosSetExceptionHandler, 354),
     LX_NATIVE_EXPORT(DosSetSignalExceptionFocus, 378),
@@ -143,6 +196,28 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
     LX_NATIVE_EXPORT(DosFlatToSel, 425)
 LX_NATIVE_MODULE_INIT_END()
 
+
+static int grabLock(pthread_mutex_t *lock)
+{
+    return (pthread_mutex_lock(lock) == 0);
+} // grabLock
+
+static void ungrabLock(pthread_mutex_t *lock)
+{
+    pthread_mutex_unlock(lock);
+} // ungrabLock
+
+static void timespecNowPlusMilliseconds(struct timespec *waittime, const ULONG ulTimeout)
+{
+    clock_gettime(CLOCK_REALTIME, waittime);
+    waittime->tv_sec += ulTimeout / 1000;
+    waittime->tv_nsec += (ulTimeout % 1000) * 1000000;
+    if (waittime->tv_nsec >= 1000000000) {
+        waittime->tv_sec++;
+        waittime->tv_nsec -= 1000000000;
+        assert(waittime->tv_nsec < 1000000000);
+    } // if
+} // timespecNowPlusMilliseconds
 
 static PTIB2 getTib2(void)
 {
@@ -296,16 +371,26 @@ APIRET DosScanEnv(PSZ name, PSZ *outval)
     return ERROR_ENVVAR_NOT_FOUND;
 } // DosScanEnv
 
+
+static int getHFileUnixDescriptor(HFILE h)
+{
+    grabLock(&GMutexDosCalls);
+    const int fd = (h < MaxHFiles) ? HFiles[h].fd : -1;
+    ungrabLock(&GMutexDosCalls);
+    return fd;
+} // getHFileUnixDescriptor
+
+
 APIRET DosWrite(HFILE h, PVOID buf, ULONG buflen, PULONG actual)
 {
     TRACE_NATIVE("DosWrite(%u, %p, %u, %p)", (uint) h, buf, (uint) buflen, actual);
 
-    // !!! FIXME: writing to a terminal should probably convert CR/LF to LF.
-
-    if ((h >= MaxHFiles) || (HFiles[h].fd == -1))
+    const int fd = getHFileUnixDescriptor(h);
+    if (fd == -1)
         return ERROR_INVALID_HANDLE;
 
-    const int rc = write(HFiles[h].fd, buf, buflen);
+    // !!! FIXME: writing to a terminal should probably convert CR/LF to LF.
+    const int rc = write(fd, buf, buflen);
     if (rc < 0) {
         *actual = 0;
         return ERROR_DISK_FULL;  // !!! FIXME: map these errors.
@@ -336,8 +421,7 @@ VOID DosExit(ULONG action, ULONG exitcode)
     // !!! FIXME: what does a value other than 0 or 1 do here?
     if (action == EXIT_THREAD) {
         // !!! FIXME: terminate thread. If last thread: terminate process.
-        fprintf(stderr, "FIXME: DosExit(0) should terminate thread, not process.\n");
-        fflush(stderr);
+        FIXME("DosExit(0) should terminate thread, not process");
     } // if
 
     // terminate the process.
@@ -348,7 +432,10 @@ VOID DosExit(ULONG action, ULONG exitcode)
     // OS/2's docs say this only keeps the lower 16 bits of exitcode.
     // !!! FIXME: ...but Unix only keeps the lowest 8 bits. Will have to
     // !!! FIXME:  tapdance to pass larger values back to OS/2 parent processes.
-    exit((int) (exitcode & 0xFFFF));
+    if (exitcode > 255)
+        FIXME("deal with process exit codes > 255. We clamped this one!");
+
+    _exit((int) (exitcode & 0xFF));
 } // DosExit
 
 APIRET DosExitList(ULONG ordercode, PFNEXITLIST fn)
@@ -415,14 +502,76 @@ APIRET DosExitList(ULONG ordercode, PFNEXITLIST fn)
 APIRET DosCreateEventSem(PSZ name, PHEV phev, ULONG attr, BOOL32 state)
 {
     TRACE_NATIVE("DosCreateEventSem('%s', %p, %u, %u)", name, phev, (uint) attr, (uint) state);
-    // !!! FIXME: write me
+
+    if (name != NULL) {
+        FIXME("implement named semaphores");
+        return ERROR_NOT_ENOUGH_MEMORY;
+    } // if
+
+    if (attr & DC_SEM_SHARED) {
+        FIXME("implement shared semaphores");
+    } // if
+
+    assert(sizeof (HEV) == sizeof (EventSem *));
+    EventSem *sem = (EventSem *) malloc(sizeof (EventSem));
+    if (sem == NULL)
+        return ERROR_NOT_ENOUGH_MEMORY;
+
+    if (pthread_mutex_init(&sem->mutex, NULL) == -1) {
+        free(sem);
+        return ERROR_NOT_ENOUGH_MEMORY;
+    } // if
+
+    if (pthread_cond_init(&sem->condition, NULL) == -1) {
+        pthread_mutex_destroy(&sem->mutex);
+        free(sem);
+        return ERROR_NOT_ENOUGH_MEMORY;
+    } // if
+
+    sem->posted = state ? 1 : 0;
+
+    *phev = (HEV) sem;
+
     return NO_ERROR;
 } // DosCreateEventSem
 
 APIRET DosCreateMutexSem(PSZ name, PHMTX phmtx, ULONG attr, BOOL32 state)
 {
     TRACE_NATIVE("DosCreateMutexSem('%s', %p, %u, %u)", name, phmtx, (uint) attr, (uint) state);
-    // !!! FIXME: write me
+
+    if (name != NULL) {
+        FIXME("implement named mutexes");
+        return ERROR_NOT_ENOUGH_MEMORY;
+    } // if
+
+    if (attr & DC_SEM_SHARED) {
+        FIXME("implement shared mutexes");
+    } // if
+
+    assert(sizeof (HMTX) == sizeof (pthread_mutex_t *));
+    pthread_mutex_t *mtx = (pthread_mutex_t *) malloc(sizeof (pthread_mutex_t));
+    if (mtx == NULL)
+        return ERROR_NOT_ENOUGH_MEMORY;
+
+    // OS/2 mutexes are recursive.
+    pthread_mutexattr_t muxattr;
+    pthread_mutexattr_init(&muxattr);
+    pthread_mutexattr_settype(&muxattr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutexattr_setrobust(&muxattr, PTHREAD_MUTEX_ROBUST);
+
+    const int rc = pthread_mutex_init(mtx, &muxattr);
+    pthread_mutexattr_destroy(&muxattr);
+
+    if (rc == -1) {
+        free(mtx);
+        return ERROR_NOT_ENOUGH_MEMORY;
+    } // if
+
+    if (state)
+        pthread_mutex_lock(mtx);
+
+    *phmtx = (HMTX) mtx;
+
     return NO_ERROR;
 } // DosCreateMutexSem
 
@@ -492,6 +641,7 @@ APIRET DosSetRelMaxFH(PLONG pincr, PULONG pcurrent)
         // OS/2 API docs say reductions in file handles are advisory, so we
         //  ignore them outright. Fight me.
         if (incr > 0) {
+            grabLock(&GMutexDosCalls);
             HFileInfo *info = (HFileInfo *) realloc(HFiles, sizeof (HFileInfo) * (MaxHFiles + incr));
             if (info != NULL) {
                 HFiles = info;
@@ -502,11 +652,14 @@ APIRET DosSetRelMaxFH(PLONG pincr, PULONG pcurrent)
                 } // for
                 MaxHFiles += incr;
             } // if
+            ungrabLock(&GMutexDosCalls);
         } // if
     } // if
 
     if (pcurrent != NULL) {
+        grabLock(&GMutexDosCalls);
         *pcurrent = MaxHFiles;
+        ungrabLock(&GMutexDosCalls);
     } // if
 
     return NO_ERROR;  // always returns NO_ERROR even if it fails.
@@ -545,14 +698,19 @@ APIRET DosQueryHType(HFILE hFile, PULONG pType, PULONG pAttr)
 {
     TRACE_NATIVE("DosQueryHType(%u, %p, %p)", (uint) hFile, pType, pAttr);
 
+    APIRET retval = NO_ERROR;
+
+    grabLock(&GMutexDosCalls);
     if ((hFile >= MaxHFiles) || (HFiles[hFile].fd == -1))
-        return ERROR_INVALID_HANDLE;
+        retval = ERROR_INVALID_HANDLE;
+    else {
+        // OS/2 will dereference a NULL pointer here, but I can't do it...!!!
+        if (pType) *pType = HFiles[hFile].type;
+        if (pAttr) *pAttr = HFiles[hFile].attr;
+    } // else
+    ungrabLock(&GMutexDosCalls);
 
-    // OS/2 will dereference a NULL pointer here, but I can't do it...!!!
-    if (pType) *pType = HFiles[hFile].type;
-    if (pAttr) *pAttr = HFiles[hFile].attr;
-
-    return NO_ERROR;
+    return retval;
 } // DosQueryHType
 
 APIRET DosSetMem(PVOID pb, ULONG cb, ULONG flag)
@@ -621,7 +779,7 @@ static int locateOneElement(char *buf)
     return 0;
 } // locateOneElement
 
-int locatePathCaseInsensitive(char *buf)
+static int locatePathCaseInsensitive(char *buf)
 {
     int rc;
     char *ptr = buf;
@@ -775,14 +933,21 @@ APIRET DosOpen(PSZ pszFileName, PHFILE pHf, PULONG pulAction, ULONG cbFile, ULON
     HFileInfo *info = HFiles;
     uint32 i;
 
-    // !!! FIXME: mutex this.
+    if (!grabLock(&GMutexDosCalls))
+        return ERROR_SYS_INTERNAL;
+
     for (i = 0; i < MaxHFiles; i++, info++) {
-        if (info->fd == -1)  // available?
+        if (info->fd == -1) {  // available?
+            info->fd = -2;
             break;
+        } // if
     } // for
 
-    if (i == MaxHFiles)
+    ungrabLock(&GMutexDosCalls);
+
+    if (i == MaxHFiles) {
         return ERROR_TOO_MANY_OPEN_FILES;
+    }
 
     const HFILE hf = i;
 
@@ -793,44 +958,46 @@ APIRET DosOpen(PSZ pszFileName, PHFILE pHf, PULONG pulAction, ULONG cbFile, ULON
         return err;
     } // if
 
-    if (strcmp(pszFileName, unixpath) != 0) { printf("DosOpen: converted '%s' to '%s'\n", pszFileName, unixpath); }
+    if (strcmp(pszFileName, unixpath) != 0) { fprintf(stderr, "DosOpen: converted '%s' to '%s'\n", pszFileName, unixpath); }
 
-    info->fd = open(unixpath, flags, mode);
+    int fd = open(unixpath, flags, mode);
 
     // if failed trying exclusive-create because file already exists, but we
     //  didn't explicitly _need_ exclusivity, retry without O_EXCL. We always
     //  try O_EXCL at first when using O_CREAT, so we can tell atomically if
     //  we were the one that created the file, to satisfy pulAction.
     int existed = 0;
-    if ((info->fd == -1) && (flags & (O_CREAT|O_EXCL)) && (errno == EEXIST) && !isExclusive) {
+    if ((fd == -1) && (flags & (O_CREAT|O_EXCL)) && (errno == EEXIST) && !isExclusive) {
         existed = 1;
-        info->fd = open(unixpath, flags & ~O_EXCL, mode);
-    } else if (info->fd != -1) {
+        fd = open(unixpath, flags & ~O_EXCL, mode);
+    } else if (fd != -1) {
         existed = 1;
     } // else if
     free(unixpath);
 
-    if (info->fd != -1) {
+    if (fd != -1) {
         if (mustNotExist) {
-            close(info->fd);
+            close(fd);
             info->fd = -1;
             return ERROR_OPEN_FAILED;  // !!! FIXME: what error does OS/2 return for this?
         } else if ( (!existed || isReplacing) && (cbFile > 0) ) {
             if (ftruncate(info->fd, cbFile) == -1) {
                 const int e = errno;
-                close(info->fd);
+                close(fd);
                 info->fd = -1;
                 errno = e;  // let the switch below sort out the OS/2 error code.
             } // if
         } // else if
     } // if
 
-    if (info->fd != -1) {
+    if (fd != -1) {
         if (isReplacing)
             FIXME("Replacing a file should delete all its EAs, too");
     } // if
 
-    if (info->fd == -1) {
+    info->fd = fd;
+
+    if (fd == -1) {
         switch (errno) {
             case EACCES: return ERROR_ACCESS_DENIED;
             case EDQUOT: return ERROR_CANNOT_MAKE;
@@ -865,15 +1032,49 @@ APIRET DosOpen(PSZ pszFileName, PHFILE pHf, PULONG pulAction, ULONG cbFile, ULON
 APIRET DosRequestMutexSem(HMTX hmtx, ULONG ulTimeout)
 {
     TRACE_NATIVE("DosRequestMutexSem(%u, %u)", (uint) hmtx, (uint) ulTimeout);
-    FIXME("implement this when we can spin threads");
-    return NO_ERROR;
+
+    if (!hmtx)
+        return ERROR_INVALID_HANDLE;
+
+    pthread_mutex_t *mutex = (pthread_mutex_t *) hmtx;
+    int rc;
+
+    if (ulTimeout == SEM_IMMEDIATE_RETURN) {
+        rc = pthread_mutex_trylock(mutex);
+    } else if (ulTimeout == SEM_INDEFINITE_WAIT) {
+        rc = pthread_mutex_lock(mutex);
+    } else {
+        struct timespec waittime;
+        timespecNowPlusMilliseconds(&waittime, ulTimeout);
+        rc = pthread_mutex_timedlock(mutex, &waittime);
+    } // else
+
+    switch (rc) {
+        case 0: return NO_ERROR;
+        case EAGAIN: return ERROR_TOO_MANY_SEM_REQUESTS;
+        case EOWNERDEAD: return ERROR_SEM_OWNER_DIED;
+        case ETIMEDOUT: return ERROR_TIMEOUT;
+        default: break;
+    } // switch
+
+    return ERROR_INVALID_HANDLE;  // oh well.
 } // DosRequestMutexSem
 
 APIRET DosReleaseMutexSem(HMTX hmtx)
 {
     TRACE_NATIVE("DosReleaseMutexSem(%u)", (uint) hmtx);
-    FIXME("implement this when we can spin threads");
-    return NO_ERROR;
+
+    if (!hmtx)
+        return ERROR_INVALID_HANDLE;
+
+    pthread_mutex_t *mutex = (pthread_mutex_t *) hmtx;
+    const int rc = pthread_mutex_unlock(mutex);
+    if (rc == 0)
+        return NO_ERROR;
+    else if (rc == EPERM)
+        return ERROR_NOT_OWNER;
+
+    return ERROR_INVALID_HANDLE;
 } // DosReleaseMutexSem
 
 APIRET DosSetFilePtr(HFILE hFile, LONG ib, ULONG method, PULONG ibActual)
@@ -888,10 +1089,11 @@ APIRET DosSetFilePtr(HFILE hFile, LONG ib, ULONG method, PULONG ibActual)
         default: return ERROR_INVALID_FUNCTION;
     } // switch
 
-    if ((hFile >= MaxHFiles) || (HFiles[hFile].fd == -1))
+    const int fd = getHFileUnixDescriptor(hFile);
+    if (fd == -1)
         return ERROR_INVALID_HANDLE;
 
-    const off_t pos = lseek(HFiles[hFile].fd, (off_t) ib, whence);
+    const off_t pos = lseek(fd, (off_t) ib, whence);
     if (pos == -1) {
         if (errno == EINVAL)
             return ERROR_NEGATIVE_SEEK;
@@ -908,10 +1110,11 @@ APIRET DosRead(HFILE hFile, PVOID pBuffer, ULONG cbRead, PULONG pcbActual)
 {
     TRACE_NATIVE("DosRead(%u, %p, %u, %p)", (uint) hFile, pBuffer, (uint) cbRead, pcbActual);
 
-    if ((hFile >= MaxHFiles) || (HFiles[hFile].fd == -1))
+    const int fd = getHFileUnixDescriptor(hFile);
+    if (fd == -1)
         return ERROR_INVALID_HANDLE;
 
-    const ssize_t br = read(HFiles[hFile].fd, pBuffer, cbRead);
+    const ssize_t br = read(fd, pBuffer, cbRead);
     if (br == -1)
         return ERROR_INVALID_FUNCTION;  // !!! FIXME: ?
 
@@ -925,16 +1128,22 @@ APIRET DosClose(HFILE hFile)
 {
     TRACE_NATIVE("DosClose(%u)", (uint) hFile);
 
-    if ((hFile >= MaxHFiles) || (HFiles[hFile].fd == -1))
+    const int fd = getHFileUnixDescriptor(hFile);
+    if (fd == -1)
         return ERROR_INVALID_HANDLE;
 
-    const int rc = close(HFiles[hFile].fd);
+    if (fd <= 2) { FIXME("remove me"); return NO_ERROR; } // for debugging purposes, remove me later.
+
+    const int rc = close(fd);
     if (rc == -1)
         return ERROR_ACCESS_DENIED;  // !!! FIXME: ?
 
+    grabLock(&GMutexDosCalls);
     HFiles[hFile].fd = -1;
     HFiles[hFile].type = 0;
     HFiles[hFile].attr = 0;
+    ungrabLock(&GMutexDosCalls);
+
     return NO_ERROR;
 } // DosClose
 
@@ -1135,11 +1344,12 @@ APIRET DosQueryFileInfo(HFILE hf, ULONG ulInfoLevel, PVOID pInfo, ULONG cbInfoBu
 {
     TRACE_NATIVE("DosQueryFileInfo(%u, %u, %p, %u)", (uint) hf, (uint) ulInfoLevel, pInfo, (uint) cbInfoBuf);
 
-    if ((hf >= MaxHFiles) || (HFiles[hf].fd == -1))
+    const int fd = getHFileUnixDescriptor(hf);
+    if (fd == -1)
         return ERROR_INVALID_HANDLE;
 
     struct stat statbuf;
-    if (fstat(HFiles[hf].fd, &statbuf) == -1)
+    if (fstat(fd, &statbuf) == -1)
         return ERROR_INVALID_HANDLE;  // !!! FIXME: ...?
 
     switch (ulInfoLevel) {
@@ -1151,6 +1361,727 @@ APIRET DosQueryFileInfo(HFILE hf, ULONG ulInfoLevel, PVOID pInfo, ULONG cbInfoBu
 
     return ERROR_INVALID_LEVEL;
 } // DosQueryFileInfo
+
+
+static void *os2ThreadEntry(void *_arg)
+{
+    Thread *thread = (Thread *) _arg;
+
+    // put our thread's TIB structs on the stack and call that the top of the stack.
+    uint8 tibdata[sizeof (TIB) + sizeof (TIB2)];
+    const uint16 selector = GLoaderState->initOs2Tib(tibdata + sizeof (tibdata), thread->stacklen, (TID) thread);
+    thread->fn(thread->fnarg);
+    GLoaderState->deinitOs2Tib(selector);
+
+    grabLock(&GMutexDosCalls);
+    thread->prev = NULL;
+    thread->next = GDeadThreads;
+    GDeadThreads = thread;
+    ungrabLock(&GMutexDosCalls);
+
+    return NULL;  // OS/2 threads don't return a value here.
+} // os2ThreadEntry
+
+APIRET DosCreateThread(PTID ptid, PFNTHREAD pfn, ULONG param, ULONG flag, ULONG cbStack)
+{
+    TRACE_NATIVE("DosCreateThread(%p, %p, %u, %u, %u)", ptid, pfn, (uint) param, (uint) flag, (uint) cbStack);
+
+    if (flag & CREATE_SUSPENDED)
+        FIXME("Can't start threads in suspended state");
+
+    Thread *thread = (Thread *) malloc(sizeof (Thread));
+    if (!thread)
+        return ERROR_NOT_ENOUGH_MEMORY;
+    memset(thread, '\0', sizeof (*thread));
+
+    size_t stacksize = cbStack;
+    if ((stacksize % 4096) != 0)
+        stacksize += 4096 - (cbStack % 4096);
+
+    thread->stacklen = stacksize;
+    thread->fn = pfn;
+    thread->fnarg = param;
+
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, stacksize);
+    const int rc = pthread_create(&thread->thread, &attr, os2ThreadEntry, thread);
+    pthread_attr_destroy(&attr);
+
+    if (rc != 0) {
+        free(thread);
+        return ERROR_MAX_THRDS_REACHED;  // I guess...?
+    } // if
+
+    if (ptid)
+        *ptid = (TID) thread;
+
+    return NO_ERROR;
+} // DosCreateThread
+
+
+static void __attribute__((noreturn)) execOs2Child(const char *exe, char * const *argv, char * const *envp)
+{
+    // !!! FIXME: wire up any other things we need here.
+    execve(exe, argv, envp);
+    fprintf(stderr, "Failed to exec child process: %s\n", strerror(errno));
+    _exit(1);  // uh oh.
+} // execOs2Child
+
+static char *findExePath(const char *exe, APIRET *err)
+{
+    FIXME("eventually this needs to search the path and maybe launch native (non-OS/2) processes too");
+    char *retval = strdup("/proc/self/exe");
+    if (!retval)
+        *err = ERROR_NOT_ENOUGH_MEMORY;
+    return retval;
+} // findExePath
+
+static char **calcEnvp(const char *os2env, const char *exe, APIRET *err)
+{
+    char **retval = NULL;
+    size_t len = 0;
+    size_t idx = 0;
+
+    const char *src = os2env;
+    if (*src == '\0') {
+        retval = (char **) malloc(sizeof (char *));
+        if (retval)
+            retval[0] = NULL;
+        return retval;
+    } // if
+
+    while (1) {
+        if (*(src++))
+            len++;
+        else {
+            idx++;
+            len += sizeof (char *) + 1;
+            if (*src == '\0')
+                break;
+        } // else
+    } // while
+
+    len += sizeof (char *);  // NULL at the end.
+    len += strlen(exe) + 16 + sizeof (char *);  // IS_2INE environment var.
+    idx++;  // IS_2INE
+
+    retval = (char **) malloc(len);
+    if (!retval) {
+        *err = ERROR_NOT_ENOUGH_MEMORY;
+        return NULL;
+    } // if
+
+    char *dst = (char *) (retval + (idx + 1));
+    char *start = dst;
+    src = os2env;
+    idx = 0;
+    while (1) {
+        const char ch = *(src++);
+        *(dst++) = ch;
+        if (!ch) {
+            retval[idx++] = start;
+            start = dst;
+            if (*src == '\0')
+                break;
+        } // if
+    } // while
+    strcpy(dst, "IS_2INE=");
+    dst += strlen(dst);
+    strcpy(dst, exe);
+    dst += strlen(dst) + 1;
+    *(dst++) = '\0';
+    retval[idx++] = start;
+
+    retval[idx] = NULL;
+    return retval;
+} // calcEnvp
+
+static char **calcArgv(const char *os2args, APIRET *err)
+{
+    const size_t argv0len = strlen(os2args);
+    if (argv0len == 0) {
+        *err = ERROR_BAD_ENVIRONMENT;
+        return NULL;  // bad.
+    } // if
+
+    size_t len = 0;
+    size_t idx = 1;
+
+    const char *src = os2args + argv0len + 1;
+
+    // this can overallocate a little, but that's alright.
+    while (*src) {
+        const char ch = *(src++);
+        if ((ch == ' ') || (ch == '\t'))
+            idx++;
+        len++;
+    } // while
+
+    idx++;  // one more for NULL terminator element.
+
+    len += argv0len + 1 + sizeof (char *);
+    len += idx * (sizeof (char *) + 1);
+
+    void *allocated = malloc(len);
+    if (!allocated) {
+        *err = ERROR_NOT_ENOUGH_MEMORY;
+        return NULL;
+    } // if
+    char **retval = (char **) allocated;
+    char *dst = (char *) (retval + idx + 1);
+
+    idx = 0;
+
+    retval[idx++] = dst;
+    strcpy(dst, os2args);
+    dst += argv0len + 1;
+
+    src = os2args + argv0len + 1;
+    while ((*src == ' ') || (*src == '\t'))
+        src++;  // skip whitespace.
+
+    const char *srcstart = src;
+
+    while (*src) {
+        const char ch = *(src++);
+        if ((ch == ' ') || (ch == '\t')) {
+            retval[idx++] = dst;
+            const size_t cpylen = ((size_t) (src - srcstart)) - 1;
+            memcpy(dst, srcstart, cpylen);
+            dst += cpylen;
+            *(dst++) = '\0';
+            while ((*src == ' ') || (*src == '\t'))
+                src++;
+            srcstart = src;
+        } else if (ch == '"') {
+            srcstart++;
+            while ((*src != '"') && (*src != '\0'))
+                src++;
+            retval[idx++] = dst;
+            const size_t cpylen = (size_t) (src - srcstart);
+            memcpy(dst, srcstart, cpylen);
+            dst += cpylen;
+            *(dst++) = '\0';
+            if (*src == '"')
+                src++;
+            while ((*src == ' ') || (*src == '\t'))
+                src++;
+            srcstart = src;
+        } // else if
+    } // for
+
+    const size_t cpylen = (size_t) (src - srcstart);
+    if (cpylen) {
+        retval[idx++] = dst;
+        memcpy(dst, srcstart, cpylen);
+        dst += cpylen;
+        *(dst++) = '\0';
+    } // if
+
+    retval[idx] = NULL;
+    return retval;
+} // calcArgv
+
+static void setProcessResultCode(PRESULTCODES pRes, const int status)
+{
+    if (!pRes)
+        return;
+
+    if (WIFEXITED(status)) {
+        // !!! FIXME: OS/2 processes exit with a ULONG, and returns bottom 16-bits of it for codeResult. Unix only gives you 8, though!
+        pRes->codeTerminate = TC_EXIT;
+        pRes->codeResult = WEXITSTATUS(status);
+    } else if (WIFSIGNALED(status)) {
+        FIXME("These might not be exactly right");
+        pRes->codeResult = 0;
+        switch (WTERMSIG(status)) {
+            case SIGTERM:
+            case SIGKILL:
+            case SIGINT:
+            case SIGQUIT:
+                pRes->codeTerminate = TC_KILLPROCESS;
+                break;
+            case SIGPIPE:
+            case SIGABRT:
+            pRes->codeTerminate = TC_HARDERROR;
+                break;
+            default:
+                pRes->codeTerminate = TC_EXCEPTION;
+                break;
+        } // switch
+    } // else if
+} // setProcessResultCode
+
+APIRET DosExecPgm(PCHAR pObjname, LONG cbObjname, ULONG execFlag, PSZ pArg, PSZ pEnv, PRESULTCODES pRes, PSZ pName)
+{
+    TRACE_NATIVE("DosExecPgm(%p, %u, %u, %p, %p, %p, '%s')", pObjname, (uint) cbObjname, (uint) execFlag, pArg, pEnv, pRes, pName);
+
+    APIRET retval = NO_ERROR;
+
+    if (pObjname)  // !!! FIXME: what does it want to put in here for failures?
+        *pObjname = '\0';
+
+    if ((execFlag == EXEC_TRACE) || (execFlag == EXEC_ASYNCRESULTDB)) { // sorry debuggers!
+        FIXME("tried to launch a process for debugging!");
+        return ERROR_ACCESS_DENIED;
+    } // if
+
+    if (execFlag == EXEC_LOAD) {
+        FIXME("What is this, exactly?");
+        return ERROR_GEN_FAILURE;
+    } // if
+
+    APIRET err;
+    char *pNameUnix = makeUnixPath(pName, &err);
+    if (!pNameUnix)
+        return err;
+
+    // calculate the args and environment first, so the child process is literally just calling execve().
+    char *exe = findExePath(pName, &retval);
+    if (!exe) {
+        free(pNameUnix);
+        return retval;
+    } // if
+
+    char **argv = calcArgv(pArg, &retval);
+    if (!argv) {
+        free(exe);
+        free(pNameUnix);
+        return retval;
+    } // if
+
+    char **envp = calcEnvp(pEnv, pNameUnix, &retval);
+    if (!argv) {
+        free(argv);
+        free(exe);
+        free(pNameUnix);
+        return retval;
+    } // if
+
+    //printf("EXEC'ING! exe='%s'\n", exe);
+    //for (char * const *ptr = argv; *ptr; ptr++) { printf(" ARGV[%d] = '%s'\n", (int) (ptr - argv), *ptr); }
+    //for (char * const *ptr = envp; *ptr; ptr++) { printf(" ENVP[%d] = '%s'\n", (int) (ptr - envp), *ptr); }
+
+    const int doubleFork = (execFlag == EXEC_ASYNC) || (execFlag == EXEC_BACKGROUND);
+    int status = 0;
+    pid_t pid = fork();
+    if (pid == -1)  // failed?
+        retval = ERROR_NO_PROC_SLOTS;
+
+    else if (pid == 0) {  // we're the child.
+        if (doubleFork) {  // fork again so we aren't a direct child of the original parent.
+            pid = fork();
+            if (pid == -1) {  // uhoh.
+                fprintf(stderr, "Failed to double-fork child process for EXEC_ASYNC: %s\n", strerror(errno));
+                _exit(1);
+            } else if (pid != 0) {  // we're the parent
+                _exit(0);  // just die now.
+            }
+            // we're the double-forked child.
+            if (setsid() < 0) {
+                fprintf(stderr, "Failed to setsid(): %s\n", strerror(errno));
+                _exit(1);
+            } // if
+            // !!! FIXME: need to report pid to original parent now via a temporary pipe.
+        } // if
+
+        // run the new program!
+        execOs2Child(exe, argv, envp);
+
+    } else {  // we're the parent.
+        switch (execFlag) {
+            case EXEC_SYNC: {
+                const int rc = waitpid(pid, &status, 0);
+                assert(rc == 0);  // !!! FIXME
+                setProcessResultCode(pRes, status);
+                break;
+            } // case
+
+            case EXEC_ASYNC:
+            case EXEC_ASYNCRESULT:
+            case EXEC_BACKGROUND:
+                if (pRes) {
+                    pRes->codeResult = 0;
+                    pRes->codeTerminate = (ULONG) pid;
+                } // if
+                break;
+
+            default:
+                assert(!"shouldn't hit this code");
+                retval = ERROR_INVALID_FUNCTION;
+                break;
+        } // switch
+    } // else
+
+    free(envp);
+    free(argv);
+    free(exe);
+
+    return retval;
+} // DosExecPgm
+
+APIRET DosResetEventSem(HEV hev, PULONG pulPostCt)
+{
+    TRACE_NATIVE("DosResetEventSem(%u, %p)", (uint) hev, pulPostCt);
+
+    if (!hev)
+        return ERROR_INVALID_HANDLE;
+
+    APIRET retval = NO_ERROR;
+    ULONG count = 0;
+    EventSem *sem = (EventSem *) hev;
+
+    pthread_mutex_lock(&sem->mutex);
+    count = sem->posted;
+    if (!sem->posted)
+        retval = ERROR_ALREADY_RESET;
+    else
+        sem->posted = 0;
+    pthread_mutex_unlock(&sem->mutex);
+
+    if (pulPostCt)
+        *pulPostCt = count;
+
+    return retval;
+} // DosResetEventSem
+
+APIRET DosPostEventSem(HEV hev)
+{
+    TRACE_NATIVE("DosPostEventSem(%u)", (uint) hev);
+
+    if (!hev)
+        return ERROR_INVALID_HANDLE;
+
+    APIRET retval = NO_ERROR;
+    EventSem *sem = (EventSem *) hev;
+
+    pthread_mutex_lock(&sem->mutex);
+    if (sem->posted)
+        retval = ERROR_ALREADY_POSTED;
+    else {
+        sem->posted = 1;
+        pthread_cond_broadcast(&sem->condition);
+    } // else
+    pthread_mutex_unlock(&sem->mutex);
+
+    return retval;
+} // DosPostEventSem
+
+APIRET DosWaitEventSem(HEV hev, ULONG ulTimeout)
+{
+    TRACE_NATIVE("DosWaitEventSem(%u, %u)", (uint) hev, (uint) ulTimeout);
+
+    if (!hev)
+        return ERROR_INVALID_HANDLE;
+
+    EventSem *sem = (EventSem *) hev;
+    int posted = 0;
+
+    if (ulTimeout == SEM_IMMEDIATE_RETURN) {
+        pthread_mutex_lock(&sem->mutex);
+        posted = sem->posted;
+        pthread_mutex_unlock(&sem->mutex);
+        return posted ? NO_ERROR : ERROR_TIMEOUT;
+    } else if (ulTimeout == SEM_INDEFINITE_WAIT) {
+        pthread_mutex_lock(&sem->mutex);
+        sem->waiting++;
+        while (1) {
+            posted = sem->posted;
+            if (!posted) {
+                pthread_cond_wait(&sem->condition, &sem->mutex);
+                posted = sem->posted;
+            } // if
+
+            if (posted) {
+                sem->waiting--;
+                pthread_mutex_unlock(&sem->mutex);
+                return NO_ERROR;
+            } // if
+
+            // spurious wakeup? Block again.
+        } // while
+    } else {  // wait for X milliseconds.
+        struct timespec waittime;
+        timespecNowPlusMilliseconds(&waittime, ulTimeout);
+
+        pthread_mutex_lock(&sem->mutex);
+        sem->waiting++;
+        while (1) {
+            int rc = 0;
+            posted = sem->posted;
+            if (!posted) {
+                rc = pthread_cond_timedwait(&sem->condition, &sem->mutex, &waittime);
+                posted = sem->posted;
+            } // if
+
+            if ((posted) || (rc == ETIMEDOUT)) {
+                sem->waiting--;
+                pthread_mutex_unlock(&sem->mutex);
+                if (posted)
+                    return NO_ERROR;  // we're good.
+                else
+                    return ERROR_TIMEOUT;
+            } // if
+
+            // otherwise, try again...spurious wakeup?
+        } // while
+    } // else
+
+    return NO_ERROR;
+} // DosWaitEventSem
+
+APIRET DosQueryEventSem(HEV hev, PULONG pulPostCt)
+{
+    TRACE_NATIVE("DosQueryEventSem(%u, %p)", (uint) hev, pulPostCt);
+
+    if (!hev)
+        return ERROR_INVALID_HANDLE;
+
+    EventSem *sem = (EventSem *) hev;
+    pthread_mutex_lock(&sem->mutex);
+    const ULONG count = (ULONG) sem->posted;
+    pthread_mutex_unlock(&sem->mutex);
+
+    if (pulPostCt)
+        *pulPostCt = count;
+
+    return NO_ERROR;
+} // DosQueryEventSem
+
+APIRET DosCloseEventSem(HEV hev)
+{
+    TRACE_NATIVE("DosCloseEventSem(%u)", (uint) hev);
+
+    if (!hev)
+        return ERROR_INVALID_HANDLE;
+
+    EventSem *sem = (EventSem *) hev;
+
+    pthread_mutex_lock(&sem->mutex);
+    const int waiting = sem->waiting;
+    pthread_mutex_unlock(&sem->mutex);
+
+    if (waiting > 0)
+        return ERROR_SEM_BUSY;
+
+    pthread_mutex_destroy(&sem->mutex);
+    pthread_cond_destroy(&sem->condition);
+    free(sem);
+
+    return NO_ERROR;
+} // DosCloseEventSem
+
+APIRET DosFreeMem(PVOID pb)
+{
+    TRACE_NATIVE("DosFreeMem(%p)", pb);
+
+    // !!! FIXME: this API is actually much more complicated than this.
+    free(pb);
+    return NO_ERROR;
+} // DosFreeMem
+
+APIRET DosWaitChild(ULONG action, ULONG option, PRESULTCODES pres, PPID ppid, PID pid)
+{
+    TRACE_NATIVE("DosWaitChild(%u, %u, %p, %p, %u)", (uint) action, (uint) option, pres, ppid, (uint) pid);
+
+    if (action == DCWA_PROCESSTREE) {
+        // we need a wait to wait on the whole tree (including trees of a
+        // terminated child we already waited on, which the API reference
+        // lists as an example.
+        FIXME("implement me");
+        return ERROR_INVALID_PARAMETER;
+    } // if
+
+    pid_t unixpid;
+    if (action == DCWA_PROCESS)
+        unixpid = (pid == 0) ? (pid_t) -1 : (pid_t) pid;
+
+    int waitoptions;
+    if (option == DCWW_WAIT) {
+        waitoptions = 0;
+    } else if (option == DCWW_NOWAIT) {
+        waitoptions = WNOHANG;
+    } else {
+        return ERROR_INVALID_PARAMETER;
+    } // else
+
+    int status = 0;
+    pid_t rc;
+    while (1) {
+        rc = waitpid(unixpid, &status, waitoptions);
+        if (rc == 0) {  // WNOHANG and no children were done.
+            assert(option == DCWW_NOWAIT);
+            return ERROR_CHILD_NOT_COMPLETE;
+        } else if (rc == -1) {
+            if (errno == EINTR)
+                continue;  // try again, I guess.
+            else if (errno == ECHILD)
+                return (pid == 0) ? ERROR_WAIT_NO_CHILDREN : ERROR_INVALID_PROCID;
+        } else {
+            break;  // we're good.
+        } // else
+
+        assert(!"Shouldn't hit this code");
+        return ERROR_CHILD_NOT_COMPLETE;
+    } // while
+
+    if (ppid)
+        *ppid = (PID) rc;
+
+    setProcessResultCode(pres, status);
+
+    return NO_ERROR;
+} // DosWaitChild
+
+APIRET OS2API DosWaitThread(PTID ptid, ULONG option)
+{
+    TRACE_NATIVE("DosWaitThread(%p, %u)", ptid, (uint) option);
+
+    Thread *thread = (Thread *) *ptid;
+    void *exitcode = NULL;
+
+    if ((option != DCWW_WAIT) && (option != DCWW_NOWAIT))
+        return ERROR_INVALID_PARAMETER;
+
+    if (thread == NULL) {   // check our dead thread list for anything.
+        while (1) {
+            grabLock(&GMutexDosCalls);
+            if (GDeadThreads) {
+                thread = GDeadThreads;
+                GDeadThreads = thread->next;
+                if (GDeadThreads)
+                    GDeadThreads->prev = NULL;
+                assert(!thread->prev);
+            } // if
+            ungrabLock(&GMutexDosCalls);
+
+            if (thread) {
+                pthread_join(thread->thread, &exitcode);  // reap it.
+                *ptid = (TID) thread;
+                free(thread);
+                return NO_ERROR;
+            } // if
+
+            if (option == DCWW_NOWAIT)
+                return ERROR_THREAD_NOT_TERMINATED;
+
+            usleep(10000);  // sleep then try again, for DCWW_WAIT.
+        } // while
+
+        assert(!"shouldn't hit this code");
+        return ERROR_THREAD_NOT_TERMINATED; // !!! FIXME
+    } // if
+
+    // codepath if we were waiting for a specific thread.
+    int rc;
+    if (option == DCWW_NOWAIT) {
+        rc = pthread_tryjoin_np(thread->thread, &exitcode);
+    } else {  //if (option == DCWW_WAIT)
+        rc = pthread_join(thread->thread, &exitcode);
+    } // else
+
+    if (rc == EBUSY)
+        return ERROR_THREAD_NOT_TERMINATED;
+    else if (rc != 0)
+        return ERROR_INVALID_THREADID; // oh well.
+
+    grabLock(&GMutexDosCalls);
+    if (thread->prev)
+        thread->prev->next = thread->next;
+    else
+        GDeadThreads = thread->next;
+
+    if (thread->next)
+        thread->next->prev = thread->prev;
+    ungrabLock(&GMutexDosCalls);
+
+    free(thread);
+    return NO_ERROR;
+} // DosWaitThread
+
+APIRET OS2API DosSleep(ULONG msec)
+{
+    TRACE_NATIVE("DosSleep(%u)", (uint) msec);
+
+    if (msec == 0)
+        sched_yield();
+    else
+        usleep(msec * 1000);
+    return NO_ERROR;
+} // DosSleep
+
+APIRET DosSubFreeMem(PVOID pbBase, PVOID pb, ULONG cb)
+{
+    TRACE_NATIVE("DosSubFreeMem(%p, %p, %u)", pbBase, pb, (uint) cb);
+    free(pb);  // !!! FIXME: obviously wrong
+    return NO_ERROR;
+} // DosSubAllocMem
+
+APIRET DosDelete(PSZ pszFile)
+{
+    TRACE_NATIVE("DosDelete('%s')", pszFile);
+
+    APIRET err;
+    char *unixpath = makeUnixPath(pszFile, &err);
+    if (!unixpath)
+        return err;
+
+    if (unlink(unixpath) == -1) {
+        switch (errno) {
+            case EACCES: return ERROR_ACCESS_DENIED;
+            case EBUSY: return ERROR_ACCESS_DENIED;
+            case EISDIR: return ERROR_ACCESS_DENIED;
+            case ENAMETOOLONG: return ERROR_FILENAME_EXCED_RANGE;
+            case ENOENT: return ERROR_FILE_NOT_FOUND;  // !!! FIXME: could be PATH_NOT_FOUND too, depending on circumstances.
+            case ENOTDIR: return ERROR_PATH_NOT_FOUND;
+            case EPERM: return ERROR_ACCESS_DENIED;
+            case EROFS: return ERROR_ACCESS_DENIED;
+            case ETXTBSY: return ERROR_ACCESS_DENIED;
+            default: return ERROR_INVALID_PARAMETER;  // !!! FIXME: debug logging about missin errno case.
+        } // switch
+        __builtin_unreachable();
+    } // if
+
+    return NO_ERROR;
+} // DosDelete
+
+APIRET DosQueryCurrentDir(ULONG disknum, PBYTE pBuf, PULONG pcbBuf)
+{
+    TRACE_NATIVE("DosQueryCurrentDir(%u, %p, %p)", (uint) disknum, pBuf, pcbBuf);
+
+    if (disknum != 3)  // C:
+        return ERROR_INVALID_DRIVE;
+
+    // !!! FIXME: this is lazy.
+    char *cwd = getcwd(NULL, 0);
+    if (!cwd)
+        return ERROR_NOT_ENOUGH_MEMORY;  // this doesn't ever return this error on OS/2.
+
+    const size_t len = strlen(cwd);
+    if ((len + 3) > *pcbBuf) {
+        *pcbBuf = len + 3;
+        return ERROR_BUFFER_OVERFLOW;
+    } // if
+
+    char *ptr = (char *) pBuf;
+    *(ptr++) = 'C';
+    *(ptr++) = ':';
+    for (char *src = cwd; *src; src++) {
+        const char ch = *src;
+        *(ptr++) = ((ch == '/') ? '\\' : ch);
+    } // for
+    *ptr = '\0';
+
+    return NO_ERROR;
+} // DosQueryCurrentDir
+
+APIRET DosSetPathInfo(PSZ pszPathName, ULONG ulInfoLevel, PVOID pInfoBuf, ULONG cbInfoBuf, ULONG flOptions)
+{
+    TRACE_NATIVE("DosSetPathInfo('%s', %u, %p, %u, %u)", pszPathName, (uint) ulInfoLevel, pInfoBuf, (uint) cbInfoBuf, (uint) flOptions);
+    FIXME("write me");
+    return NO_ERROR;
+} // DosSetPathInfo
 
 // end of doscalls.c ...
 
