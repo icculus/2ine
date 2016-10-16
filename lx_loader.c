@@ -325,7 +325,7 @@ static uint16 initOs2Tib(void *_topOfStack, const size_t stacklen, const uint32 
     //  Wine does it. I still don't know why.
     const unsigned int segment = (entry.entry_number << 3) | 3;
     __asm__ __volatile__ ( "movw %%ax, %%fs  \n\t" : : "a" (segment) );
-    return (uint16) segment;
+    return (uint16) entry.entry_number;
 } // initOs2Tib
 
 static void deinitOs2Tib(const uint16 selector)
