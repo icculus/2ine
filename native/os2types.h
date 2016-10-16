@@ -33,6 +33,8 @@ typedef uint16_t USHORT, *PUSHORT;
 typedef int32_t LONG, *PLONG;
 typedef uint32_t ULONG, *PULONG;
 typedef uint32_t BOOL32, *PBOOL32;
+typedef int64_t LONGLONG, *PLONGLONG;
+typedef uint64_t ULONGLONG, *PULONGLONG;
 typedef uint8_t BYTE, *PBYTE;
 
 // !!! FIXME: HANDLE should either be 64-bits on x86_64, or we need to
@@ -49,6 +51,8 @@ typedef HANDLE HMTX, *PHMTX;
 typedef HANDLE PID, *PPID;
 typedef HANDLE TID, *PTID;
 typedef PCHAR PSZ;
+
+typedef int (APIENTRY *PFN)(void);
 
 #ifdef __cplusplus
 }

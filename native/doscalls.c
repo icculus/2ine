@@ -168,13 +168,16 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
     LX_NATIVE_EXPORT(DosRead, 281),
     LX_NATIVE_EXPORT(DosWrite, 282),
     LX_NATIVE_EXPORT(DosExecPgm, 283),
+    LX_NATIVE_EXPORT(DosQueryCp, 291),
     LX_NATIVE_EXPORT(DosExitList, 296),
     LX_NATIVE_EXPORT(DosAllocMem, 299),
     LX_NATIVE_EXPORT(DosFreeMem, 304),
     LX_NATIVE_EXPORT(DosSetMem, 305),
     LX_NATIVE_EXPORT(DosCreateThread, 311),
     LX_NATIVE_EXPORT(DosGetInfoBlocks, 312),
+    LX_NATIVE_EXPORT(DosQueryModuleHandle, 319),
     LX_NATIVE_EXPORT(DosQueryModuleName, 320),
+    LX_NATIVE_EXPORT(DosQueryProcAddr, 321),
     LX_NATIVE_EXPORT(DosCreateEventSem, 324),
     LX_NATIVE_EXPORT(DosCloseEventSem, 326),
     LX_NATIVE_EXPORT(DosResetEventSem, 327),
@@ -193,7 +196,8 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
     LX_NATIVE_EXPORT(DosEnterMustComplete, 380),
     LX_NATIVE_EXPORT(DosExitMustComplete, 381),
     LX_NATIVE_EXPORT(DosSetRelMaxFH, 382),
-    LX_NATIVE_EXPORT(DosFlatToSel, 425)
+    LX_NATIVE_EXPORT(DosFlatToSel, 425),
+    LX_NATIVE_EXPORT(DosOpenL, 981)
 LX_NATIVE_MODULE_INIT_END()
 
 
@@ -843,10 +847,8 @@ static char *makeUnixPath(const char *os2path, APIRET *err)
     return retval;
 } // makeUnixPath
 
-APIRET DosOpen(PSZ pszFileName, PHFILE pHf, PULONG pulAction, ULONG cbFile, ULONG ulAttribute, ULONG fsOpenFlags, ULONG fsOpenMode, PEAOP2 peaop2)
+static APIRET doDosOpen(PSZ pszFileName, PHFILE pHf, PULONG pulAction, LONGLONG cbFile, ULONG ulAttribute, ULONG fsOpenFlags, ULONG fsOpenMode, PEAOP2 peaop2)
 {
-    TRACE_NATIVE("DosOpen('%s', %p, %p, %u, %u, %u, %u, %p)", pszFileName, pHf, pulAction, (uint) cbFile, (uint) ulAttribute, (uint) fsOpenFlags, (uint) fsOpenMode, peaop2);
-
     int isReadOnly = 0;
     int flags = 0;
     const ULONG access_mask = OPEN_ACCESS_READONLY | OPEN_ACCESS_WRITEONLY | OPEN_ACCESS_READWRITE;
@@ -1027,6 +1029,12 @@ APIRET DosOpen(PSZ pszFileName, PHFILE pHf, PULONG pulAction, ULONG cbFile, ULON
 
     *pHf = hf;
     return NO_ERROR;
+} // doDosOpen
+
+APIRET DosOpen(PSZ pszFileName, PHFILE pHf, PULONG pulAction, ULONG cbFile, ULONG ulAttribute, ULONG fsOpenFlags, ULONG fsOpenMode, PEAOP2 peaop2)
+{
+    TRACE_NATIVE("DosOpen('%s', %p, %p, %u, %u, %u, %u, %p)", pszFileName, pHf, pulAction, (uint) cbFile, (uint) ulAttribute, (uint) fsOpenFlags, (uint) fsOpenMode, peaop2);
+    return doDosOpen(pszFileName, pHf, pulAction, (LONGLONG) cbFile, ulAttribute, fsOpenFlags, fsOpenMode, peaop2);
 } // DosOpen
 
 APIRET DosRequestMutexSem(HMTX hmtx, ULONG ulTimeout)
@@ -2050,7 +2058,7 @@ APIRET DosQueryCurrentDir(ULONG disknum, PBYTE pBuf, PULONG pcbBuf)
 {
     TRACE_NATIVE("DosQueryCurrentDir(%u, %p, %p)", (uint) disknum, pBuf, pcbBuf);
 
-    if (disknum != 3)  // C:
+    if ((disknum != 0) && (disknum != 3))  // C:  (or "current")
         return ERROR_INVALID_DRIVE;
 
     // !!! FIXME: this is lazy.
@@ -2082,6 +2090,83 @@ APIRET DosSetPathInfo(PSZ pszPathName, ULONG ulInfoLevel, PVOID pInfoBuf, ULONG 
     FIXME("write me");
     return NO_ERROR;
 } // DosSetPathInfo
+
+APIRET DosQueryModuleHandle(PSZ pszModname, PHMODULE phmod)
+{
+    TRACE_NATIVE("DosQueryModuleHandle('%s', %p)", pszModname, phmod);
+    grabLock(&GMutexDosCalls);
+    LxModule *lxmod;
+    for (lxmod = GLoaderState->loaded_modules; lxmod; lxmod = lxmod->next) {
+        if (strcasecmp(lxmod->name, pszModname) == 0)
+            break;
+    } // for
+    ungrabLock(&GMutexDosCalls);
+
+    if (phmod)
+        *phmod = (HMODULE) lxmod;
+
+    return lxmod ? NO_ERROR : ERROR_INVALID_NAME;
+} // DosQueryModuleHandle
+
+APIRET DosQueryProcAddr(HMODULE hmod, ULONG ordinal, PSZ pszName, PFN* ppfn)
+{
+    TRACE_NATIVE("DosQueryProcAddr(%u, %u, '%s', %p)", (uint) hmod, (uint) ordinal, pszName, ppfn);
+
+    const LxModule *lxmod = (LxModule *) hmod;
+    const LxExport *exports = lxmod->exports;
+    const uint32 num_exports = lxmod->num_exports;
+
+    if (ordinal > 65533) {
+        return ERROR_INVALID_ORDINAL;  // according to the docs.
+    } else if (ordinal != 0) {
+        for (uint32 i = 0; i < num_exports; i++, exports++) {
+            if (exports->ordinal == ordinal) {
+                if (ppfn)
+                    *ppfn = (PFN) exports->addr;
+                return NO_ERROR;
+            } // if
+        } // for
+        return ERROR_INVALID_ORDINAL;
+    } else {
+        // the docs explicitly say that you can't do name lookups in
+        //  the DOSCALLS module, but whatever, I allow it.
+        for (uint32 i = 0; i < num_exports; i++, exports++) {
+            if (exports->name && (strcmp(exports->name, pszName) == 0)) {
+                if (ppfn)
+                    *ppfn = (PFN) exports->addr;
+                return NO_ERROR;
+            } // if
+        } // for
+        return ERROR_INVALID_NAME;
+    } // else
+
+    __builtin_unreachable();
+} // DosQueryProcAddr
+
+APIRET DosQueryCp(ULONG cb, PULONG arCP, PULONG pcCP)
+{
+    TRACE_NATIVE("DosQueryCp(%u, %p, %p)", (uint) cb, arCP, pcCP);
+
+    FIXME("This is mostly a stub");
+
+    if (cb < sizeof (ULONG) * 2)
+        return ERROR_CPLIST_TOO_SMALL;
+
+    // 437 == United States codepage.
+    arCP[0] = 437;  // current process codepage
+    arCP[1] = 437;  // prepared system codepage
+
+    if (pcCP)
+        *pcCP = sizeof (ULONG) * 2;
+
+    return NO_ERROR;
+} // DosQueryCp
+
+APIRET DosOpenL(PSZ pszFileName, PHFILE pHf, PULONG pulAction, LONGLONG cbFile, ULONG ulAttribute, ULONG fsOpenFlags, ULONG fsOpenMode, PEAOP2 peaop2)
+{
+    TRACE_NATIVE("DosOpenL('%s', %p, %p, %llu, %u, %u, %u, %p)", pszFileName, pHf, pulAction, (unsigned long long) cbFile, (uint) ulAttribute, (uint) fsOpenFlags, (uint) fsOpenMode, peaop2);
+    return doDosOpen(pszFileName, pHf, pulAction, cbFile, ulAttribute, fsOpenFlags, fsOpenMode, peaop2);
+} // DosOpenL
 
 // end of doscalls.c ...
 

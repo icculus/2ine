@@ -323,7 +323,6 @@ APIRET OS2API DosEnterMustComplete(PULONG pulNesting);
 APIRET OS2API DosExitMustComplete(PULONG pulNesting);
 APIRET OS2API DosQueryPathInfo(PSZ pszPathName, ULONG ulInfoLevel, PVOID pInfoBuf, ULONG cbInfoBuf);
 APIRET OS2API DosQueryFileInfo(HFILE hf, ULONG ulInfoLevel, PVOID pInfo, ULONG cbInfoBuf);
-APIRET OS2API DosQueryFileInfo(HFILE hf, ULONG ulInfoLevel, PVOID pInfo, ULONG cbInfoBuf);
 APIRET OS2API DosCreateThread(PTID ptid, PFNTHREAD pfn, ULONG param, ULONG flag, ULONG cbStack);
 APIRET OS2API DosExecPgm(PCHAR pObjname, LONG cbObjname, ULONG execFlag, PSZ pArg, PSZ pEnv, PRESULTCODES pRes, PSZ pName);
 APIRET OS2API DosResetEventSem(HEV hev, PULONG pulPostCt);
@@ -339,6 +338,10 @@ APIRET OS2API DosSubFreeMem(PVOID pbBase, PVOID pb, ULONG cb);
 APIRET OS2API DosDelete(PSZ pszFile);
 APIRET OS2API DosQueryCurrentDir(ULONG disknum, PBYTE pBuf, PULONG pcbBuf);
 APIRET OS2API DosSetPathInfo(PSZ pszPathName, ULONG ulInfoLevel, PVOID pInfoBuf, ULONG cbInfoBuf, ULONG flOptions);
+APIRET OS2API DosQueryModuleHandle(PSZ pszModname, PHMODULE phmod);
+APIRET OS2API DosQueryProcAddr(HMODULE hmod, ULONG ordinal, PSZ pszName, PFN* ppfn);
+APIRET OS2API DosQueryCp(ULONG cb, PULONG arCP, PULONG pcCP);
+APIRET OS2API DosOpenL(PSZ pszFileName, PHFILE pHf, PULONG pulAction, LONGLONG cbFile, ULONG ulAttribute, ULONG fsOpenFlags, ULONG fsOpenMode, PEAOP2 peaop2);
 
 #ifdef __cplusplus
 }
