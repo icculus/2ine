@@ -494,7 +494,7 @@ static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
         "movl %%esi,%%esp  \n\t"  // use the OS/2 process's stack.
         "pushl %%ecx       \n\t"  // save original stack pointer for real.
         "pushl %%eax       \n\t"  // isTermination
-        "pushl $0          \n\t"  // library module handle  !!! FIXME
+        "pushl %%edx       \n\t"  // library module handle
         "leal 1f,%%eax     \n\t"  // address that entry point should return to.
         "pushl %%eax       \n\t"
         "pushl %%edi       \n\t"  // the OS/2 library entry point (we'll "ret" to it instead of jmp, so stack and registers are all correct).
@@ -513,7 +513,7 @@ static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
         "popfl             \n\t"  // restore our original flags.
         "popal             \n\t"  // restore our original registers.
             : // no outputs
-            : "a" (isTermination), "S" (stack), "D" (lxmod->eip)
+            : "a" (isTermination), "d" (lxmod), "S" (stack), "D" (lxmod->eip)
             : "memory"
     );
 
