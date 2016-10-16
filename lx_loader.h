@@ -185,12 +185,14 @@ typedef struct LxTIB
 } LxTIB;
 #pragma pack(pop)
 
+#define LXTIBSIZE (sizeof (LxTIB) + sizeof (LxTIB2))
+
 typedef struct LxLoaderState
 {
     LxModule *loaded_modules;
     LxModule *main_module;
     int subprocess;
-    uint16 (*initOs2Tib)(void *_topOfStack, const size_t stacklen, const uint32 tid);
+    uint16 (*initOs2Tib)(uint8 *tibspace, void *_topOfStack, const size_t stacklen, const uint32 tid);
     void (*deinitOs2Tib)(const uint16 selector);
 } LxLoaderState;
 

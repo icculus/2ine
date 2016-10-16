@@ -1371,13 +1371,10 @@ APIRET DosQueryFileInfo(HFILE hf, ULONG ulInfoLevel, PVOID pInfo, ULONG cbInfoBu
 } // DosQueryFileInfo
 
 
-static void *os2ThreadEntry(void *_arg)
+static void os2ThreadEntry2(uint8 *tibspace, Thread *thread)
 {
-    Thread *thread = (Thread *) _arg;
-
-    // put our thread's TIB structs on the stack and call that the top of the stack.
-    uint8 tibdata[sizeof (TIB) + sizeof (TIB2)];
-    const uint16 selector = GLoaderState->initOs2Tib(tibdata + sizeof (tibdata), thread->stacklen, (TID) thread);
+    void *esp = NULL;  // close enough.
+    const uint16 selector = GLoaderState->initOs2Tib(tibspace, &esp, thread->stacklen, (TID) thread);
     thread->fn(thread->fnarg);
     GLoaderState->deinitOs2Tib(selector);
 
@@ -1386,7 +1383,13 @@ static void *os2ThreadEntry(void *_arg)
     thread->next = GDeadThreads;
     GDeadThreads = thread;
     ungrabLock(&GMutexDosCalls);
+} // os2ThreadEntry2
 
+static void *os2ThreadEntry(void *arg)
+{
+    // put our thread's TIB structs on the stack and call that the top of the stack.
+    uint8 tibspace[LXTIBSIZE];
+    os2ThreadEntry2(tibspace, (Thread *) arg);
     return NULL;  // OS/2 threads don't return a value here.
 } // os2ThreadEntry
 

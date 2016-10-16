@@ -20,6 +20,7 @@
 
 static LxLoaderState _GLoaderState;
 static LxLoaderState *GLoaderState = &_GLoaderState;
+static uint8 GMainTibSpace[LXTIBSIZE];
 
 // !!! FIXME: move this into an lx_common.c file.
 static int sanityCheckLxModule(uint8 **_exe, uint32 *_exelen)
@@ -280,22 +281,18 @@ static void *generateMissingTrampoline(const char *_module, const char *_entry)
 //  the EMX runtime) touch the register directly, so we have to deal with it.
 // You must call this once for each thread that will go into LX land, from
 //  that thread, as soon as possible after starting.
-static uint16 initOs2Tib(void *_topOfStack, const size_t stacklen, const uint32 tid)
+static uint16 initOs2Tib(uint8 *tibspace, void *_topOfStack, const size_t stacklen, const uint32 tid)
 {
     uint8 *topOfStack = (uint8 *) _topOfStack;
-    const size_t tiblen = (sizeof (LxTIB) + sizeof (LxTIB2));
-    assert(stacklen > tiblen);
 
-    // set aside the first 40 bytes of the thread's stack for
-    //  the Thread Information Block structs (24 for TIB and 16 for TIB2).
-    LxTIB *tib = (LxTIB *) (topOfStack - tiblen);
+    LxTIB *tib = (LxTIB *) tibspace;
     LxTIB2 *tib2 = (LxTIB2 *) (tib + 1);
-    memset(tib, '\0', tiblen);
+    memset(tib, '\0', LXTIBSIZE);
 
     FIXME("This is probably 50% wrong");
     tib->tib_pexchain = NULL;
-    tib->tib_pstack = (void *) topOfStack;
-    tib->tib_pstacklimit = topOfStack - stacklen;
+    tib->tib_pstack = topOfStack - stacklen;
+    tib->tib_pstacklimit = (void *) topOfStack;
     tib->tib_ptib2 = tib2;
     tib->tib_version = 20;  // !!! FIXME
     tib->tib_ordinal = 79;  // !!! FIXME
@@ -310,7 +307,7 @@ static uint16 initOs2Tib(void *_topOfStack, const size_t stacklen, const uint32 
     struct user_desc entry;
     entry.entry_number = -1;
     entry.base_addr = (unsigned int) ((size_t)tib);
-    entry.limit = tiblen;
+    entry.limit = LXTIBSIZE;
     entry.seg_32bit = 1;
     entry.contents = MODIFY_LDT_CONTENTS_DATA;
     entry.read_exec_only = 0;
@@ -537,7 +534,7 @@ static void freeLxModule(LxModule *lxmod)
 
     if (lxmod->initialized) {
         if (!lxmod->nativelib) {
-            runLxLibraryTerm(lxmod);
+            runLxLibraryTerm(lxmod);  // !!! FIXME: check term flag and eip.
         } else {
             LxNativeModuleDeinitEntryPoint fn = (LxNativeModuleDeinitEntryPoint) dlsym(lxmod->nativelib, "lxNativeModuleDeinit");
             if (fn)
@@ -958,7 +955,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
     if (!isDLL) {
         // This needs to be set up now, so it's available to any library
         //  init code that runs in LX land.
-        initOs2Tib((void *) ((size_t) retval->esp), retval->mmaps[retval->lx.esp_object - 1].size, 0);
+        initOs2Tib(GMainTibSpace, (void *) ((size_t) retval->esp), retval->mmaps[retval->lx.esp_object - 1].size, 0);
     } // if
 
     // Set up our exports...
@@ -1100,7 +1097,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
         if (retval->eip) {
             assert(GLoaderState->main_module != NULL);
             assert(GLoaderState->main_module != retval);
-            runLxLibraryInit(retval);
+            runLxLibraryInit(retval);  // !!! FIXME: check term flag and eip.
         } // if
 
         retval->initialized = 1;
