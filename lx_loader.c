@@ -346,6 +346,7 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
 {
     // Eventually, the environment table looks like this (double-null to terminate list):  var1=a\0var2=b\0var3=c\0\0
     // The command line looks like this: \0argv0\0argv1 argv2 argvN\0\0
+    // Between env and cmd is the exe name: argv0\0
 
     size_t len = 1;
     for (int i = 0; i < argc; i++) {
@@ -366,6 +367,8 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
 
         len++;  // terminator
     } // for
+
+    len += strlen(argv[0]) + 1;  // for the exe name.
 
     const char *default_os2path = "PATH=C:\\home\\icculus\\Dropbox\\emx\\bin;C:\\home\\icculus";  // !!! FIXME: noooooope.
     for (int i = 0; envp[i]; i++) {
@@ -401,6 +404,10 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
         ptr += strlen(str) + 1;
     }
     *(ptr++) = '\0';
+
+    // put the exe name between the environment and the command line.
+    strcpy(ptr, argv[0]);
+    ptr += strlen(argv[0]) + 1;
 
     char *cmd = ptr;
     strcpy(ptr, argv[0]);
