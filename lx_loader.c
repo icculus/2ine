@@ -455,7 +455,7 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
         "pushl %%eax       \n\t"  // cmd
         "pushl %%ecx       \n\t"  // env
         "pushl $0          \n\t"  // reserved
-        "pushl $0          \n\t"  // module handle  !!! FIXME
+        "pushl %%edx       \n\t"  // module handle
         "leal 1f,%%eax     \n\t"  // address that entry point should return to.
         "pushl %%eax       \n\t"
         "pushl %%edi       \n\t"  // the OS/2 process entry point (we'll "ret" to it instead of jmp, so stack and registers are all correct).
@@ -466,7 +466,6 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
         "xorl %%esi,%%esi  \n\t"
         "xorl %%edi,%%edi  \n\t"
         "xorl %%ebp,%%ebp  \n\t"
-        // !!! FIXME: init other registers!
         "ret               \n\t"  // go to OS/2 land!
         "1:                \n\t"  //  ...and return here.
         "andl $-16, %%esp  \n\t"  // align the stack for macOS.
@@ -474,7 +473,7 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
         "pushl %%eax       \n\t"  // call _exit() with whatever is in %eax.
         "call _exit        \n\t"
             : // no outputs
-            : "a" (cmd), "c" (env), "S" (stack), "D" (lxmod->eip)
+            : "a" (cmd), "c" (env), "d" (lxmod), "S" (stack), "D" (lxmod->eip)
             : "memory"
     );
 
