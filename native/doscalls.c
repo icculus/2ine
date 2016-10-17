@@ -265,22 +265,11 @@ APIRET DosGetInfoBlocks(PTIB *pptib, PPIB *pppib)
 {
     TRACE_NATIVE("DosGetInfoBlocks(%p, %p)", pptib, pppib);
 
-    if (pptib != NULL) {
+    if (pptib != NULL)
         *pptib = getTib();
-    } // if
 
-    if (pppib != NULL) {
-        static PIB pib;
-        if (pib.pib_ulpid == 0) {
-            // !!! FIXME: this is seriously incomplete.
-            pib.pib_hmte = (HMODULE) GLoaderState->main_module;
-            pib.pib_ulpid = (uint32) getpid();
-            pib.pib_ulppid = (uint32) getppid();
-            pib.pib_pchcmd = GLoaderState->main_module->cmd;
-            pib.pib_pchenv = GLoaderState->main_module->env;
-        } // if
-        *pppib = &pib;
-    } // if
+    if (pppib != NULL)
+        *pppib = (PPIB) &GLoaderState->pib;
 
     return 0;
 } // DosGetInfoBlocks
@@ -382,7 +371,7 @@ APIRET DosScanEnv(PSZ name, PSZ *outval)
 {
     TRACE_NATIVE("DosScanEnv('%s', %p)", name, outval);
 
-    char *env = GLoaderState->main_module->env;
+    char *env = GLoaderState->pib.pib_pchenv;
     const size_t len = strlen(name);
     while (*env) {
         if ((strncmp(env, name, len) == 0) && (env[len] == '=')) {

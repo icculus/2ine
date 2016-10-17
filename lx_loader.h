@@ -155,8 +155,6 @@ struct LxModule
     uint32 eip;
     uint32 esp;
     int initialized;
-    char *env;
-    char *cmd;
     char *os2path;  // absolute path to module, in OS/2 format
     // !!! FIXME: put this elsewhere?
     uint32 signal_exception_focus_count;
@@ -183,6 +181,18 @@ typedef struct LxTIB
     uint32 tib_version;
     uint32 tib_ordinal;
 } LxTIB;
+
+typedef struct LxPIB
+{
+    uint32 pib_ulpid;
+    uint32 pib_ulppid;
+    void *pib_hmte;
+    char *pib_pchcmd;
+    char *pib_pchenv;
+    uint32 pib_flstatus;
+    uint32 pib_ultype;
+} LxPIB;
+
 #pragma pack(pop)
 
 #define LXTIBSIZE (sizeof (LxTIB) + sizeof (LxTIB2))
@@ -191,6 +201,7 @@ typedef struct LxLoaderState
 {
     LxModule *loaded_modules;
     LxModule *main_module;
+    LxPIB pib;
     int subprocess;
     int running;
     uint16 (*initOs2Tib)(uint8 *tibspace, void *_topOfStack, const size_t stacklen, const uint32 tid);

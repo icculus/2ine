@@ -341,106 +341,6 @@ static void deinitOs2Tib(const uint16 selector)
 
 static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int argc, char **argv, char **envp)
 {
-    // Eventually, the environment table looks like this (double-null to terminate list):  var1=a\0var2=b\0var3=c\0\0
-    // The command line looks like this: \0argv0\0argv1 argv2 argvN\0\0
-    // Between env and cmd is the exe name: argv0\0
-
-    size_t len = 1;
-    for (int i = 0; i < argc; i++) {
-        int needs_escape = 0;
-        int num_backslashes = 0;
-        for (const char *arg = argv[i]; *arg; arg++) {
-            const char ch = *arg;
-            if ((ch == ' ') || (ch == '\t'))
-                needs_escape = 1;
-            else if ((ch == '\\') || (ch == '\"'))
-                num_backslashes++;
-            len++;
-        } // for
-
-        if (needs_escape) {
-            len += 2 + num_backslashes;
-        } // if
-
-        len++;  // terminator
-    } // for
-
-    len += strlen(argv[0]) + 1;  // for the exe name.
-
-    const char *default_os2path = "PATH=C:\\home\\icculus\\Dropbox\\emx\\bin;C:\\home\\icculus";  // !!! FIXME: noooooope.
-    for (int i = 0; envp[i]; i++) {
-        const char *str = envp[i];
-        if (strncmp(str, "PATH=", 5) == 0) {
-            if (!GLoaderState->subprocess)
-                str = default_os2path;
-        } else if (strncmp(str, "IS_2INE=", 8) == 0) {
-            continue;
-        } // if
-        len += strlen(str) + 1;
-    } // for
-
-    len += 4;  // null terminators.
-
-    char *env = (char *) malloc(len);
-    if (!env) {
-        fprintf(stderr, "Out of memory\n");
-        exit(1);
-    } // if
-
-    char *ptr = env;
-    for (int i = 0; envp[i]; i++) {
-        const char *str = envp[i];
-        if (strncmp(str, "PATH=", 5) == 0) {
-            if (!GLoaderState->subprocess)
-                str = default_os2path;
-        } else if (strncmp(str, "IS_2INE=", 8) == 0) {
-            continue;
-        } // if
-
-        strcpy(ptr, str);
-        ptr += strlen(str) + 1;
-    }
-    *(ptr++) = '\0';
-
-    // put the exe name between the environment and the command line.
-    strcpy(ptr, argv[0]);
-    ptr += strlen(argv[0]) + 1;
-
-    char *cmd = ptr;
-    strcpy(ptr, argv[0]);
-    ptr += strlen(argv[0]);
-    *(ptr++) = '\0';
-    for (int i = 1; i < argc; i++) {
-        int needs_escape = 0;
-        for (const char *arg = argv[i]; *arg; arg++) {
-            const char ch = *arg;
-            if ((ch == ' ') || (ch == '\t'))
-                needs_escape = 1;
-        } // for
-
-        if (needs_escape) {
-            *(ptr++) = '"';
-            for (const char *arg = argv[i]; *arg; arg++) {
-                const char ch = *arg;
-                if ((ch == '\\') || (ch == '\n'))
-                    *(ptr++) = '\\';
-                *(ptr++) = ch;
-            } // for
-            *(ptr++) = '"';
-        } else {
-            for (const char *arg = argv[i]; *arg; arg++)
-                *(ptr++) = *arg;
-        } // if
-
-        if (i < (argc-1))
-            *(ptr++) = ' ';
-    } // for
-
-    *(ptr++) = '\0';
-
-    lxmod->env = env;
-    lxmod->cmd = cmd;
-
     uint8 *stack = (uint8 *) ((size_t) lxmod->esp);
     stack -= sizeof (LxTIB) + sizeof (LxTIB2);  // skip the TIB data.
 
@@ -472,7 +372,9 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
         "pushl %%eax       \n\t"  // call _exit() with whatever is in %eax.
         "call _exit        \n\t"
             : // no outputs
-            : "a" (cmd), "c" (env), "d" (lxmod), "S" (stack), "D" (lxmod->eip)
+            : "a" (GLoaderState->pib.pib_pchcmd),
+              "c" (GLoaderState->pib.pib_pchenv),
+              "d" (lxmod), "S" (stack), "D" (lxmod->eip)
             : "memory"
     );
 
@@ -906,8 +808,9 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
         *ptr = '\0';
     } // if
 
-    if (!isDLL) { // !!! FIXME: mutex?
+    if (!isDLL) {
         GLoaderState->main_module = retval;
+        GLoaderState->pib.pib_hmte = retval;
     } // else if
 
     const char *modname = retval->name;
@@ -1312,6 +1215,118 @@ static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int
     return retval;
 } // loadLxModuleByModuleNameInternal
 
+static void initPib(LxPIB *pib, const int argc, char **argv, char **envp)
+{
+    // !!! FIXME: this is incomplete.
+    memset(pib, '\0', sizeof (*pib));
+
+    // Eventually, the environment table looks like this (double-null to terminate list):  var1=a\0var2=b\0var3=c\0\0
+    // The command line looks like this: \0argv0\0argv1 argv2 argvN\0\0
+    // Between env and cmd is the exe name: argv0\0
+
+    size_t len = 1;
+    for (int i = 0; i < argc; i++) {
+        int needs_escape = 0;
+        int num_backslashes = 0;
+        for (const char *arg = argv[i]; *arg; arg++) {
+            const char ch = *arg;
+            if ((ch == ' ') || (ch == '\t'))
+                needs_escape = 1;
+            else if ((ch == '\\') || (ch == '\"'))
+                num_backslashes++;
+            len++;
+        } // for
+
+        if (needs_escape) {
+            len += 2 + num_backslashes;
+        } // if
+
+        len++;  // terminator
+    } // for
+
+    len += strlen(argv[0]) + 1;  // for the exe name.
+
+    const char *default_os2path = "PATH=C:\\home\\icculus\\Dropbox\\emx\\bin;C:\\WATCOM\\binp;C:\\home\\icculus";  // !!! FIXME: noooooope.
+    for (int i = 0; envp[i]; i++) {
+        const char *str = envp[i];
+        if (strncmp(str, "PATH=", 5) == 0) {
+            if (!GLoaderState->subprocess)
+                str = default_os2path;
+        } else if (strncmp(str, "IS_2INE=", 8) == 0) {
+            continue;
+        } // if
+        len += strlen(str) + 1;
+    } // for
+
+    len += 4;  // null terminators.
+
+    char *env = (char *) malloc(len);
+    if (!env) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    } // if
+
+    char *ptr = env;
+    for (int i = 0; envp[i]; i++) {
+        const char *str = envp[i];
+        if (strncmp(str, "PATH=", 5) == 0) {
+            if (!GLoaderState->subprocess)
+                str = default_os2path;
+        } else if (strncmp(str, "IS_2INE=", 8) == 0) {
+            continue;
+        } // if
+
+        strcpy(ptr, str);
+        ptr += strlen(str) + 1;
+    }
+    *(ptr++) = '\0';
+
+    // put the exe name between the environment and the command line.
+    strcpy(ptr, argv[0]);
+    ptr += strlen(argv[0]) + 1;
+
+    char *cmd = ptr;
+    strcpy(ptr, argv[0]);
+    ptr += strlen(argv[0]);
+    *(ptr++) = '\0';
+    for (int i = 1; i < argc; i++) {
+        int needs_escape = 0;
+        for (const char *arg = argv[i]; *arg; arg++) {
+            const char ch = *arg;
+            if ((ch == ' ') || (ch == '\t'))
+                needs_escape = 1;
+        } // for
+
+        if (needs_escape) {
+            *(ptr++) = '"';
+            for (const char *arg = argv[i]; *arg; arg++) {
+                const char ch = *arg;
+                if ((ch == '\\') || (ch == '\n'))
+                    *(ptr++) = '\\';
+                *(ptr++) = ch;
+            } // for
+            *(ptr++) = '"';
+        } else {
+            for (const char *arg = argv[i]; *arg; arg++)
+                *(ptr++) = *arg;
+        } // if
+
+        if (i < (argc-1))
+            *(ptr++) = ' ';
+    } // for
+
+    *(ptr++) = '\0';
+
+    pib->pib_ulpid = (uint32) getpid();
+    pib->pib_ulppid = (uint32) getppid();
+    pib->pib_pchcmd = cmd;
+    pib->pib_pchenv = env;
+    //pib->pib_hmte is filled in later during loadLxModule()
+    // !!! FIXME: uint32 pib_flstatus;
+    // !!! FIXME: uint32 pib_ultype;
+} // initPib
+
+
 static LxModule *loadLxModuleByModuleName(const char *modname)
 {
     return loadLxModuleByModuleNameInternal(modname, 0);
@@ -1330,16 +1345,20 @@ int main(int argc, char **argv, char **envp)
     GLoaderState->deinitOs2Tib = deinitOs2Tib;
     GLoaderState->loadModule = loadLxModuleByModuleName;
 
-    LxModule *lxmod = loadLxModuleByPath(envr ? envr : argv[1]);
-    if (!lxmod) {
-        return 1;
-    }
+    const char *modulename = GLoaderState->subprocess ? envr : argv[1];
 
     // standalone, drop argv[0]. As a subprocess, keep it.
     if (!GLoaderState->subprocess) {
         argc--;
         argv++;
     } // if
+
+    initPib(&GLoaderState->pib, argc, argv, envp);
+
+    LxModule *lxmod = loadLxModuleByPath(modulename);
+    if (!lxmod) {
+        return 1;
+    }
     runLxModule(lxmod, argc, argv, envp);
 
     return 1;  // you shouldn't hit this, but if you do, report failure.
