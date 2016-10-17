@@ -447,6 +447,8 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
     // ...and you pass it the pointer to argv0. This is (at least as far as the docs suggest) appended to the environment table.
     //fprintf(stderr, "jumping into LX land...! eip=0x%X esp=0x%X\n", (uint) lxmod->eip, (uint) lxmod->esp); fflush(stderr);
 
+    GLoaderState->running = 1;
+
     __asm__ __volatile__ (
         "movl %%esi,%%esp  \n\t"  // use the OS/2 process's stack.
         "pushl %%eax       \n\t"  // cmd
@@ -479,20 +481,28 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
 
 static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
 {
-    uint8 *stack = (uint8 *) ((size_t) GLoaderState->main_module->esp);
-    stack -= sizeof (LxTIB) + sizeof (LxTIB2);  // skip the TIB data.
+    uint8 *stack = NULL;
 
-    //fprintf(stderr, "jumping into LX land to %s library...! eip=0x%X esp=0x%X\n", isTermination ? "terminate" : "initialize", (uint) lxmod->eip, (uint) GLoaderState->main_module->esp); fflush(stderr);
+    // force us over to OS/2 main module's stack if we aren't already on it.
+    if (!GLoaderState->running) {
+        stack = (uint8 *) ((size_t) GLoaderState->main_module->esp);
+        stack -= sizeof (LxTIB) + sizeof (LxTIB2);  // skip the TIB data.
+    } // if
+
+    fprintf(stderr, "jumping into LX land to %s library...! eip=0x%X esp=0x%X\n", isTermination ? "terminate" : "initialize", (uint) lxmod->eip, (uint) GLoaderState->main_module->esp); fflush(stderr);
 
     __asm__ __volatile__ (
         "pushal            \n\t"  // save all the current registers.
         "pushfl            \n\t"  // save all the current flags.
         "movl %%esp,%%ecx  \n\t"  // save our stack to a temporary register.
+        "testl %%esi,%%esi \n\t"  // force the OS/2 process's stack?
+        "je 1f             \n\t"  // if 0, nope, we're already good.
         "movl %%esi,%%esp  \n\t"  // use the OS/2 process's stack.
+        "1:                \n\t"  //
         "pushl %%ecx       \n\t"  // save original stack pointer for real.
         "pushl %%eax       \n\t"  // isTermination
         "pushl %%edx       \n\t"  // library module handle
-        "leal 1f,%%eax     \n\t"  // address that entry point should return to.
+        "leal 2f,%%eax     \n\t"  // address that entry point should return to.
         "pushl %%eax       \n\t"
         "pushl %%edi       \n\t"  // the OS/2 library entry point (we'll "ret" to it instead of jmp, so stack and registers are all correct).
         "xorl %%eax,%%eax  \n\t"
@@ -502,10 +512,9 @@ static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
         "xorl %%esi,%%esi  \n\t"
         "xorl %%edi,%%edi  \n\t"
         "xorl %%ebp,%%ebp  \n\t"
-        // !!! FIXME: init other registers!
         "ret               \n\t"  // go to OS/2 land!
-        "1:                \n\t"  //  ...and return here.
-        "addl $8,%%esp      \n\t"  // drop arguments to entry point.
+        "2:                \n\t"  //  ...and return here.
+        "addl $8,%%esp     \n\t"  // drop arguments to entry point.
         "popl %%esp        \n\t"  // restore native process stack now.
         "popfl             \n\t"  // restore our original flags.
         "popal             \n\t"  // restore our original registers.
@@ -514,12 +523,36 @@ static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
             : "memory"
     );
 
+    fprintf(stderr, "...survived time in LX land!\n"); fflush(stderr);
+
     // !!! FIXME: this entry point returns a result...do we abort if it reports error?
-    //fprintf(stderr, "...survived time in LX land!\n"); fflush(stderr);
+    // !!! FIXME: (actually, DosLoadModule() can report that failure. Abort if (GLoaderState->running == 0), though!)
 } // runLxLibraryInitOrTerm
 
-static inline void runLxLibraryInit(LxModule *lxmod) { runLxLibraryInitOrTerm(lxmod, 0); }
-static inline void runLxLibraryTerm(LxModule *lxmod) { runLxLibraryInitOrTerm(lxmod, 1); }
+static void runLxLibraryInit(LxModule *lxmod)
+{
+    // we don't check the LIBINIT flag, because if the EIP fields are valid
+    //  but this bit is missing, we're supposed to do "global" initialization,
+    //  which I guess means it runs once for all processes on the system
+    //  instead of once per process...but we aren't really a full OS/2 system
+    //  so maybe it's okay to do global init in isolation...? We'll cross that
+    //  bridge when we come to it, I guess. Either way: this is running here,
+    //  flag or not.
+    if (1) { //if (lxmod->module_flags & 0x4) {  // LIBINIT flag
+        if (lxmod->lx.eip_object != 0)
+            runLxLibraryInitOrTerm(lxmod, 0);
+    } // if
+} // runLxLibraryInit
+
+static void runLxLibraryTerm(LxModule *lxmod)
+{
+    // See notes about global initialization in runLxLibraryInit(); it
+    //  applies to deinit here, too.
+    if (1) { //if (lxmod->module_flags & 0x40000000) {  // LIBTERM flag
+        if (lxmod->lx.eip_object != 0)
+            runLxLibraryInitOrTerm(lxmod, 1);
+    } // if
+} // runLxLibraryTerm
 
 static void freeLxModule(LxModule *lxmod)
 {
@@ -534,7 +567,7 @@ static void freeLxModule(LxModule *lxmod)
 
     if (lxmod->initialized) {
         if (!lxmod->nativelib) {
-            runLxLibraryTerm(lxmod);  // !!! FIXME: check term flag and eip.
+            runLxLibraryTerm(lxmod);
         } else {
             LxNativeModuleDeinitEntryPoint fn = (LxNativeModuleDeinitEntryPoint) dlsym(lxmod->nativelib, "lxNativeModuleDeinit");
             if (fn)
@@ -1094,11 +1127,9 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
         retval->initialized = 1;
     } else {
         // call library init code...
-        if (retval->eip) {
-            assert(GLoaderState->main_module != NULL);
-            assert(GLoaderState->main_module != retval);
-            runLxLibraryInit(retval);  // !!! FIXME: check term flag and eip.
-        } // if
+        assert(GLoaderState->main_module != NULL);
+        assert(GLoaderState->main_module != retval);
+        runLxLibraryInit(retval);
 
         retval->initialized = 1;
 

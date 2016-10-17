@@ -192,6 +192,7 @@ typedef struct LxLoaderState
     LxModule *loaded_modules;
     LxModule *main_module;
     int subprocess;
+    int running;
     uint16 (*initOs2Tib)(uint8 *tibspace, void *_topOfStack, const size_t stacklen, const uint32 tid);
     void (*deinitOs2Tib)(const uint16 selector);
     LxModule *(*loadModule)(const char *modname);
