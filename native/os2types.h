@@ -46,6 +46,7 @@ typedef uint32_t LHANDLE, *PLHANDLE;
 typedef LHANDLE HANDLE, *PHANDLE;
 typedef HANDLE HMODULE, *PHMODULE;
 typedef HANDLE HFILE, *PHFILE;
+typedef HANDLE HDIR, *PHDIR;
 typedef HANDLE HEV, *PHEV;
 typedef HANDLE HMTX, *PHMTX;
 typedef HANDLE PID, *PPID;

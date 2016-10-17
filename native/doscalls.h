@@ -7,6 +7,9 @@
 extern "C" {
 #endif
 
+#define CCHMAXPATH 260
+#define CCHMAXPATHCOMP 256
+
 enum
 {
     EXIT_THREAD,
@@ -181,6 +184,7 @@ enum
     FIL_QUERYFULLNAME = 5
 };
 
+#pragma pack(push, 1)
 typedef struct
 {
     USHORT day : 5;
@@ -194,6 +198,7 @@ typedef struct
     USHORT minutes : 6;
     USHORT hours : 5;
 } FTIME, *PFTIME;
+#pragma pack(pop)
 
 typedef struct
 {
@@ -289,6 +294,65 @@ enum
    DSPI_WRTTHRU = 0x10,
 };
 
+enum
+{
+    HDIR_CREATE = -1,
+    HDIR_SYSTEM = 1
+};
+
+enum
+{
+   MUST_HAVE_READONLY = ( (FILE_READONLY << 8) | FILE_READONLY ),
+   MUST_HAVE_HIDDEN = ( (FILE_HIDDEN << 8) | FILE_HIDDEN ),
+   MUST_HAVE_SYSTEM = ( (FILE_SYSTEM << 8) | FILE_SYSTEM),
+   MUST_HAVE_DIRECTORY = ( (FILE_DIRECTORY << 8) | FILE_DIRECTORY ),
+   MUST_HAVE_ARCHIVED = ( (FILE_ARCHIVED  << 8) | FILE_ARCHIVED  )
+};
+
+typedef struct
+{
+    ULONG oNextEntryOffset;
+    FDATE fdateCreation;
+    FTIME ftimeCreation;
+    FDATE fdateLastAccess;
+    FTIME ftimeLastAccess;
+    FDATE fdateLastWrite;
+    FTIME ftimeLastWrite;
+    ULONG cbFile;
+    ULONG cbFileAlloc;
+    ULONG attrFile;
+    UCHAR cchName;
+    CHAR achName[CCHMAXPATHCOMP];
+} FILEFINDBUF3, *PFILEFINDBUF3;
+
+typedef struct
+{
+    ULONG oNextEntryOffset;
+    FDATE fdateCreation;
+    FTIME ftimeCreation;
+    FDATE fdateLastAccess;
+    FTIME ftimeLastAccess;
+    FDATE fdateLastWrite;
+    FTIME ftimeLastWrite;
+    ULONG cbFile;
+    ULONG cbFileAlloc;
+    ULONG attrFile;
+    ULONG cbList;
+    UCHAR cchName;
+    CHAR achName[CCHMAXPATHCOMP];
+} FILEFINDBUF4, *PFILEFINDBUF4;
+
+enum
+{
+    DEVINFO_PRINTER,
+    DEVINFO_RS232,
+    DEVINFO_FLOPPY,
+    DEVINFO_COPROCESSOR,
+    DEVINFO_SUBMODEL,
+    DEVINFO_MODEL,
+    DEVINFO_ADAPTER
+};
+
 
 // !!! FIXME: these should probably get sorted alphabetically and/or grouped
 // !!! FIXME:  into areas of functionality, but for now, I'm just listing them
@@ -342,6 +406,11 @@ APIRET OS2API DosQueryModuleHandle(PSZ pszModname, PHMODULE phmod);
 APIRET OS2API DosQueryProcAddr(HMODULE hmod, ULONG ordinal, PSZ pszName, PFN* ppfn);
 APIRET OS2API DosQueryCp(ULONG cb, PULONG arCP, PULONG pcCP);
 APIRET OS2API DosOpenL(PSZ pszFileName, PHFILE pHf, PULONG pulAction, LONGLONG cbFile, ULONG ulAttribute, ULONG fsOpenFlags, ULONG fsOpenMode, PEAOP2 peaop2);
+APIRET OS2API DosFindFirst(PSZ pszFileSpec, PHDIR phdir, ULONG flAttribute, PVOID pfindbuf, ULONG cbBuf, PULONG pcFileNames, ULONG ulInfoLevel);
+APIRET OS2API DosFindNext(HDIR hDir, PVOID pfindbuf, ULONG cbfindbuf, PULONG pcFilenames);
+APIRET OS2API DosFindClose(HDIR hDir);
+APIRET OS2API DosQueryCurrentDisk(PULONG pdisknum, PULONG plogical);
+APIRET OS2API DosDevConfig(PVOID pdevinfo, ULONG item);
 
 #ifdef __cplusplus
 }

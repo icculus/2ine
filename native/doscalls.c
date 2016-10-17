@@ -87,6 +87,18 @@ typedef struct
     volatile int waiting;
 } EventSem;
 
+
+typedef struct
+{
+    DIR *dirp;
+    ULONG attr;
+    ULONG level;
+    char pattern[CCHMAXPATHCOMP];
+} DirFinder;
+
+static DirFinder GHDir1;
+
+
 LX_NATIVE_MODULE_DEINIT({
     ExitListItem *next = GExitList;
     GExitList = NULL;
@@ -157,12 +169,17 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
     LX_NATIVE_EXPORT(DosQueryHType, 224),
     LX_NATIVE_EXPORT(DosScanEnv, 227),
     LX_NATIVE_EXPORT(DosGetDateTime, 230),
+    LX_NATIVE_EXPORT(DosDevConfig, 231),
     LX_NATIVE_EXPORT(DosExit, 234),
     LX_NATIVE_EXPORT(DosSetFilePtr, 256),
     LX_NATIVE_EXPORT(DosClose, 257),
     LX_NATIVE_EXPORT(DosDelete, 259),
+    LX_NATIVE_EXPORT(DosFindClose, 263),
+    LX_NATIVE_EXPORT(DosFindFirst, 264),
+    LX_NATIVE_EXPORT(DosFindNext, 265),
     LX_NATIVE_EXPORT(DosOpen, 273),
     LX_NATIVE_EXPORT(DosQueryCurrentDir, 274),
+    LX_NATIVE_EXPORT(DosQueryCurrentDisk, 275),
     LX_NATIVE_EXPORT(DosQueryFileInfo, 279),
     LX_NATIVE_EXPORT(DosWaitChild, 280),
     LX_NATIVE_EXPORT(DosRead, 281),
@@ -1205,22 +1222,31 @@ static void unixTimeToOs2(const time_t unixtime, FDATE *os2date, FTIME *os2time)
     os2time->hours = (USHORT) lt.tm_hour;
 } // unixTimeToOs2
 
+static inline void initFileCreationDateTime(FDATE *fdate, FTIME *ftime)
+{
+    // we don't store creation date on Unix. OS/2 zeroes out fields that aren't
+    //  appropriate to FAT file systems, but I don't want to risk apps using
+    //  zeroes to decide a file in on a FAT disk and reducing features,
+    //  shrinking filenames to 8.3, etc.
+    if (fdate) {
+        fdate->day = 1;
+        fdate->month = 1;
+        fdate->year = 0;  // years since 1980, apparently.
+    } // if
+
+    if (ftime) {
+        ftime->twosecs = 0;
+        ftime->minutes = 0;
+        ftime->hours = 0;
+    } // if
+} // initFileCreationDateTime
+
 static APIRET queryFileInfoStandardFromStat(const struct stat *statbuf, PVOID pInfoBuf, ULONG cbInfoBuf)
 {
     FILESTATUS3 *st = (FILESTATUS3 *) pInfoBuf;
     memset(st, '\0', sizeof (*st));
 
-    // we don't store creation date on Unix. OS/2 zeroes out fields that aren't
-    //  appropriate to FAT file systems, but I don't want to risk apps using
-    //  zeroes to decide a file in on a FAT disk and reducing features,
-    //  shrinking filenames to 8.3, etc.
-    st->fdateCreation.day = 1;
-    st->fdateCreation.month = 1;
-    st->fdateCreation.year = 0;  // years since 1980, apparently.
-    st->ftimeCreation.twosecs = 0;
-    st->ftimeCreation.minutes = 0;
-    st->ftimeCreation.hours = 0;
-
+    initFileCreationDateTime(&st->fdateCreation, &st->ftimeCreation);
     unixTimeToOs2(statbuf->st_atime, &st->fdateLastAccess, &st->ftimeLastAccess);
     unixTimeToOs2(statbuf->st_mtime, &st->fdateLastWrite, &st->ftimeLastWrite);
 
@@ -1229,7 +1255,7 @@ static APIRET queryFileInfoStandardFromStat(const struct stat *statbuf, PVOID pI
 
     if (S_ISDIR(statbuf->st_mode))
         st->attrFile |= FILE_DIRECTORY;
-    if (statbuf->st_mode & ~S_IRUSR)  // !!! FIXME: not accurate...?
+    if ((statbuf->st_mode & S_IWUSR) == 0)  // !!! FIXME: not accurate...?
         st->attrFile |= FILE_READONLY;
 
     return NO_ERROR;
@@ -2170,6 +2196,350 @@ APIRET DosOpenL(PSZ pszFileName, PHFILE pHf, PULONG pulAction, LONGLONG cbFile, 
     TRACE_NATIVE("DosOpenL('%s', %p, %p, %llu, %u, %u, %u, %p)", pszFileName, pHf, pulAction, (unsigned long long) cbFile, (uint) ulAttribute, (uint) fsOpenFlags, (uint) fsOpenMode, peaop2);
     return doDosOpen(pszFileName, pHf, pulAction, cbFile, ulAttribute, fsOpenFlags, fsOpenMode, peaop2);
 } // DosOpenL
+
+
+static int wildcardMatch(const char *str, const char *pattern)
+{
+    // !!! FIXME: the way OS/2 matches files is sort of complex, and I'm not sure this is 100% right.
+    int ext = 0;
+    while (1) {
+        const char pat = *(pattern++);
+        if (pat == '\0') {
+            return (*str == '\0') ? 1 : 0;
+        } else if (pat == '?') {
+            if (*str)  // also matches end of string, but don't advance.
+                str++;
+        } else if ((pat == '.') && (!ext)) {
+            ext = 1;
+            if (*str == '.')
+                str++;
+            else if (*str != '\0')
+                return 0;
+        } else if (pat == '*') {
+            const char next = *pattern;
+            while (*str && (*str != next))
+                str++;
+        } else {
+            const char ch = *str;
+            const char a = ((ch >= 'A') && (ch <= 'Z')) ? (ch - ('A' - 'a')) : ch;
+            const char b = ((pat >= 'A') && (pat <= 'Z')) ? (pat - ('A' - 'a')) : pat;
+            if (a == b)
+                str++;
+            else
+                return 0;
+        } // else
+    } // while
+
+    __builtin_unreachable();
+} // wildcardMatch
+
+static int findNextOne(DirFinder *dirf, PVOID *ppfindbuf, PULONG pcbBuf)
+{
+    const ULONG attr = dirf->attr;
+    const ULONG musthave = (attr & 0xFF00) >> 8;
+    const ULONG mayhave = (attr & 0x00FF);
+
+    // these attributes mean nothing on Unix, so if they are Must Haves, return nothing.
+    if (musthave & (FILE_HIDDEN | FILE_SYSTEM | FILE_ARCHIVED))
+        return 0;
+
+    struct dirent *dent;
+    const int fd = dirfd(dirf->dirp);
+    const char *pattern = dirf->pattern;
+
+    while ((dent = readdir(dirf->dirp)) != NULL) {
+        const char *name = dent->d_name;
+        // !!! FIXME: OS/2 doesn't enumerate ".." for the drive root!
+        //if (strcmp(name, "..") == 0) { if drive_root continue; }
+
+        const size_t namelen = strlen(name);
+        if (namelen >= CCHMAXPATHCOMP) continue;
+
+        if (!wildcardMatch(name, pattern)) continue;
+
+        // we stat(), not lstat(), because OS/2 doesn't understand symlinks,
+        //  so we pretend the real file/dir is there. This could cause
+        //  problems with broken links and infinite loops, though.
+        //  For lstat-like behaviour, if we change our minds, the last arg
+        //  of fstatat() needs the AT_SYMLINK_NOFOLLOW flag.
+        struct stat statbuf;
+        if (fstatat(fd, name, &statbuf, 0) == -1) continue;
+
+        const int isfile = S_ISREG(statbuf.st_mode);
+        const int isdir = S_ISDIR(statbuf.st_mode);
+        if (!isfile && !isdir) continue;  // OS/2 didn't have fifos, devs, sockets, etc.
+        assert(isfile != isdir);
+
+        if (isdir) {
+            if ((mayhave & FILE_DIRECTORY) == 0) continue;
+        } else {
+            if (musthave & FILE_DIRECTORY) continue;
+        } // else
+
+        const int readonly = ((statbuf.st_mode & S_IWUSR) == 0);  // !!! FIXME: not accurate...?
+        if (readonly) {
+            if ((mayhave & FILE_READONLY) == 0) continue;
+        } else {
+            if (musthave & FILE_READONLY) continue;
+        } // else
+
+
+        // okay! Definitely take this one!
+        switch (dirf->level) {
+            case FIL_STANDARD: {
+                PFILEFINDBUF3 st = (PFILEFINDBUF3) *ppfindbuf;
+                memset(st, '\0', sizeof (*st));
+                *ppfindbuf = st + 1;
+                *pcbBuf -= sizeof (*st);
+                st->oNextEntryOffset = sizeof (*st);
+                initFileCreationDateTime(&st->fdateCreation, &st->ftimeCreation);
+                unixTimeToOs2(statbuf.st_atime, &st->fdateLastAccess, &st->ftimeLastAccess);
+                unixTimeToOs2(statbuf.st_mtime, &st->fdateLastWrite, &st->ftimeLastWrite);
+                st->cbFile = (ULONG) statbuf.st_size;  // !!! FIXME: > 2gig files?
+                st->cbFileAlloc = (ULONG) (statbuf.st_blocks * 512);
+                if (isdir) st->attrFile |= FILE_DIRECTORY;
+                if (readonly) st->attrFile |= FILE_READONLY;
+                st->cchName = (UCHAR) namelen;
+                strcpy(st->achName, name);
+                return 1;
+            } // case
+
+            case FIL_QUERYEASIZE: {
+                PFILEFINDBUF4 st = (PFILEFINDBUF4) *ppfindbuf;
+                memset(st, '\0', sizeof (*st));
+                *ppfindbuf = st + 1;
+                *pcbBuf -= sizeof (*st);
+                st->oNextEntryOffset = sizeof (*st);
+                initFileCreationDateTime(&st->fdateCreation, &st->ftimeCreation);
+                unixTimeToOs2(statbuf.st_atime, &st->fdateLastAccess, &st->ftimeLastAccess);
+                unixTimeToOs2(statbuf.st_mtime, &st->fdateLastWrite, &st->ftimeLastWrite);
+                st->cbFile = (ULONG) statbuf.st_size;  // !!! FIXME: > 2gig files?
+                st->cbFileAlloc = (ULONG) (statbuf.st_blocks * 512);
+                if (isdir) st->attrFile |= FILE_DIRECTORY;
+                if (readonly) st->attrFile |= FILE_READONLY;
+                st->cbList = 0;  FIXME("write me: EA support");
+                st->cchName = (UCHAR) namelen;
+                strcpy(st->achName, name);
+                return 1;
+            } // case
+
+            case FIL_QUERYEASFROMLIST:
+                FIXME("write me");
+                break;
+        } // switch
+    } // while
+
+    return 0;  // found nothing else that matches our needs.
+} // findNextOne
+    
+
+static APIRET findNext(DirFinder *dirf, PVOID pfindbuf, ULONG cbBuf, PULONG pcFileNames)
+{
+    if (!dirf->dirp) {
+        *pcFileNames = 0;
+        return ERROR_NO_MORE_FILES;
+    } // if
+
+    const ULONG maxents = *pcFileNames;
+    ULONG i;
+    for (i = 0; i < maxents; i++) {
+        if (!findNextOne(dirf, &pfindbuf, &cbBuf))
+            break;
+    } // for
+
+    *pcFileNames = i;
+
+    if ((i == 0) && (maxents > 0)) {
+        closedir(dirf->dirp);
+        dirf->dirp = NULL;
+    } // if
+
+    return NO_ERROR;
+} // findNext
+
+static inline ULONG findNextSizeNeeded(const ULONG ulInfoLevel, const ULONG pcFileNames)
+{
+    switch (ulInfoLevel) {
+        case FIL_STANDARD: return sizeof (FILEFINDBUF3) * pcFileNames;
+        case FIL_QUERYEASIZE: return sizeof (FILEFINDBUF4) * pcFileNames;
+        case FIL_QUERYEASFROMLIST: FIXME("write me"); return 0xFFFFFFFF;
+        default: assert(!"Shouldn't hit this."); return 0xFFFFFFFF;
+    } // switch
+    __builtin_unreachable();
+} // findNextSizeNeeded;
+
+APIRET DosFindFirst(PSZ pszFileSpec, PHDIR phdir, ULONG flAttribute, PVOID pfindbuf, ULONG cbBuf, PULONG pcFileNames, ULONG ulInfoLevel)
+{
+    TRACE_NATIVE("DosFindFirst('%s', %p, %u, %p, %u, %p, %u)", pszFileSpec, phdir, (uint) flAttribute, pfindbuf, (uint) cbBuf, pcFileNames, (uint) ulInfoLevel);
+
+    if (flAttribute & 0xffffc8c8)  // reserved bits that must be zero.
+        return ERROR_INVALID_PARAMETER;
+    else if (cbBuf > 0xFFFF)   // !!! FIXME: Control Program API Reference says this fails if > 64k, although that was obviously a 16-bit limitation.
+        return ERROR_INVALID_PARAMETER;
+    else if ((ulInfoLevel != FIL_STANDARD) && (ulInfoLevel != FIL_QUERYEASIZE) && (ulInfoLevel != FIL_QUERYEASFROMLIST))
+        return ERROR_INVALID_PARAMETER;
+    else if (!pcFileNames)
+        return ERROR_INVALID_PARAMETER;
+    else if (!pfindbuf && (*pcFileNames != 0))
+        return ERROR_INVALID_PARAMETER;
+    else if (!phdir)
+        return ERROR_INVALID_PARAMETER;
+    else if (!*phdir)
+        return ERROR_INVALID_HANDLE;
+    else if (cbBuf < findNextSizeNeeded(ulInfoLevel, *pcFileNames))
+        return ERROR_BUFFER_OVERFLOW;
+
+    if (ulInfoLevel != FIL_STANDARD) {
+        FIXME("implement extended attribute support");
+        return ERROR_INVALID_PARAMETER;
+    } // if
+
+    if (flAttribute == FILE_NORMAL)
+        flAttribute = FILE_READONLY | FILE_HIDDEN | FILE_SYSTEM | FILE_ARCHIVED;  // most of the "may-have" bits.
+
+    APIRET err = NO_ERROR;
+    char *path = makeUnixPath(pszFileSpec, &err);
+    if (!path)
+        return err;
+
+    char *pattern = strrchr(path, '/');
+    if (pattern)
+        *(pattern++) = '\0';
+    else
+        pattern = path;
+
+    if (strlen(pattern) >= CCHMAXPATHCOMP) {
+        free(path);
+        return ERROR_FILENAME_EXCED_RANGE;
+    } // if
+
+    DirFinder *dirf = NULL;
+    if (*phdir == HDIR_SYSTEM) {
+        dirf = &GHDir1;
+    } else if (*phdir == HDIR_CREATE) {
+        dirf = (DirFinder *) malloc(sizeof (DirFinder));
+        if (!dirf) {
+            free(path);
+            return ERROR_NOT_ENOUGH_MEMORY;
+        } // if
+        memset(dirf, '\0', sizeof (*dirf));
+    } else {
+        dirf = (DirFinder *) *phdir;
+    } // else
+
+    DIR *dirp = opendir((path == pattern) ? "." : path);
+    if (!dirp) {
+        const int rc = errno;
+        if (*phdir == HDIR_CREATE)
+            free(dirf);
+        free(path);
+        switch (rc) {
+            case EACCES: return ERROR_ACCESS_DENIED;
+            case EMFILE: return ERROR_NO_MORE_SEARCH_HANDLES;
+            case ENFILE: return ERROR_NO_MORE_SEARCH_HANDLES;
+            case ENOMEM: return ERROR_NOT_ENOUGH_MEMORY;
+            case ENOENT: return ERROR_PATH_NOT_FOUND;  // !!! FIXME: should this be FILE_NOT_FOUND if the parent dir exists...?
+            case ENAMETOOLONG: return ERROR_FILENAME_EXCED_RANGE;
+            default: break;
+        } // switch
+        return ERROR_PATH_NOT_FOUND;  // oh well.
+    } // if
+
+    if (dirf->dirp)
+        closedir(dirf->dirp);
+
+    dirf->dirp = dirp;
+    dirf->attr = flAttribute;
+    dirf->level = ulInfoLevel;
+    strcpy(dirf->pattern, pattern);
+    free(path);
+
+    err = findNext(dirf, pfindbuf, cbBuf, pcFileNames);
+
+    // From the Control Program API reference:
+    //  "Any nonzero return code, except ERROR_EAS_DIDNT_FIT, indicates that no handle has been allocated. This includes such nonerror
+    //  indicators as ERROR_NO_MORE_FILES."
+    if ((err != NO_ERROR) && (err != ERROR_EAS_DIDNT_FIT)) {
+        closedir(dirf->dirp);
+        dirf->dirp = NULL;
+        if (*phdir == HDIR_CREATE)
+            free(dirf);
+        return err;
+    } // if
+
+    *phdir = (HDIR) dirf;
+    return NO_ERROR;
+} // DosFindFirst
+
+APIRET DosFindNext(HDIR hDir, PVOID pfindbuf, ULONG cbfindbuf, PULONG pcFilenames)
+{
+    TRACE_NATIVE("DosFindNext(%u, %p, %u, %p)", (uint) hDir, pfindbuf, (uint) cbfindbuf, pcFilenames);
+
+    if ((hDir == 0) || (hDir == HDIR_SYSTEM) || (hDir == HDIR_CREATE))
+        return ERROR_INVALID_HANDLE;
+    else if (cbfindbuf > 0xFFFF)   // !!! FIXME: Control Program API Reference says this fails if > 64k, although that was obviously a 16-bit limitation.
+        return ERROR_INVALID_PARAMETER;
+    else if (!pcFilenames)
+        return ERROR_INVALID_PARAMETER;
+    else if (!pfindbuf && (*pcFilenames != 0))
+        return ERROR_INVALID_PARAMETER;
+    else if (cbfindbuf < findNextSizeNeeded(((DirFinder *) hDir)->level, *pcFilenames))
+        return ERROR_BUFFER_OVERFLOW;
+    return findNext((DirFinder *) hDir, pfindbuf, cbfindbuf, pcFilenames);
+} // DosFindNext
+
+APIRET DosFindClose(HDIR hDir)
+{
+    TRACE_NATIVE("DosFindClose(%u)", (uint) hDir);
+
+    if ((hDir == 0) || (hDir == HDIR_SYSTEM) || (hDir == HDIR_CREATE))
+        return ERROR_INVALID_HANDLE;
+
+    DirFinder *dirf = (DirFinder *) hDir;
+    if (dirf->dirp)
+        closedir(dirf->dirp);
+
+    if (dirf == &GHDir1)
+        memset(dirf, '\0', sizeof (*dirf));
+    else
+        free(dirf);
+
+    return NO_ERROR;
+} // DosFindClose
+
+APIRET DosQueryCurrentDisk(PULONG pdisknum, PULONG plogical)
+{
+    TRACE_NATIVE("DosQueryCurrentDisk(%p, %p)", pdisknum, plogical);
+
+    // we only offer a "C:" drive at the moment.
+    if (pdisknum)
+        *pdisknum = 3;  // C:
+    if (plogical)
+        *plogical = (1 << 2);  // just C:
+    return NO_ERROR;
+} // DosQueryCurrentDisk
+
+APIRET DosDevConfig(PVOID pdevinfo, ULONG item)
+{
+    TRACE_NATIVE("DosDevConfig(%p, %u)", pdevinfo, (uint) item);
+
+    if (pdevinfo == NULL)
+        return ERROR_INVALID_PARAMETER;
+
+    BYTE *info = (BYTE *) pdevinfo;
+    switch (item) {
+        case DEVINFO_PRINTER: *info = 0; break; // we don't report any printers.
+        case DEVINFO_RS232: *info = 0; break;   // we don't report any serial ports.
+        case DEVINFO_FLOPPY: *info = 0; break;  // we don't report any floppies.
+        case DEVINFO_COPROCESSOR: *info = 1; break;  // We could check for this, but c'mon.
+        case DEVINFO_SUBMODEL: *info = 1; break; // OS/2 Warp 4 under Vmware returns this, but I don't know what this means.
+        case DEVINFO_MODEL: *info = 252; break;  // OS/2 Warp 4 under Vmware returns this, but I don't know what this means.
+        case DEVINFO_ADAPTER: *info = 1; break;  // sure, you have a real display from the last 30+ years.
+        default: return ERROR_INVALID_PARAMETER;
+    } // switch
+
+    return NO_ERROR;
+} // DosDevConfig
 
 // end of doscalls.c ...
 
