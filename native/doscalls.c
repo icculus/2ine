@@ -608,10 +608,6 @@ APIRET DosSetExceptionHandler(PEXCEPTIONREGISTRATIONRECORD rec)
 
 ULONG DosFlatToSel(PVOID ptr)
 {
-    // this actually passes the arg in eax instead of the stack.
-    //uint32 eax = 0;
-    //__asm__ __volatile__ ("" : "=a" (eax));
-    //TRACE_NATIVE("DosFlatToSel(%p)", (void *) (size_t) eax);
     TRACE_NATIVE("DosFlatToSel(%p)", ptr);
     return ((ULONG) ((size_t)ptr)) >> 16;  // !!! FIXME
 } // DosFlatToSel
