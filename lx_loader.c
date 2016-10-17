@@ -528,7 +528,7 @@ static void freeLxModule(LxModule *lxmod)
 
     // !!! FIXME: mutex from here
     lxmod->refcount--;
-    printf("unref'd module '%s' to %u\n", lxmod->name, (uint) lxmod->refcount);
+    fprintf(stderr, "unref'd module '%s' to %u\n", lxmod->name, (uint) lxmod->refcount);
     if (lxmod->refcount > 0)
         return;  // something is still using it.
 
@@ -1242,7 +1242,7 @@ static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int
     return retval;
 } // loadLxModuleByModuleNameInternal
 
-static inline LxModule *loadLxModuleByModuleName(const char *modname)
+static LxModule *loadLxModuleByModuleName(const char *modname)
 {
     return loadLxModuleByModuleNameInternal(modname, 0);
 } // loadLxModuleByModuleName
@@ -1258,6 +1258,7 @@ int main(int argc, char **argv, char **envp)
     GLoaderState->subprocess = (envr != NULL);
     GLoaderState->initOs2Tib = initOs2Tib;
     GLoaderState->deinitOs2Tib = deinitOs2Tib;
+    GLoaderState->loadModule = loadLxModuleByModuleName;
 
     LxModule *lxmod = loadLxModuleByPath(envr ? envr : argv[1]);
     if (!lxmod) {

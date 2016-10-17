@@ -171,6 +171,7 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
     LX_NATIVE_EXPORT(DosGetDateTime, 230),
     LX_NATIVE_EXPORT(DosDevConfig, 231),
     LX_NATIVE_EXPORT(DosExit, 234),
+    LX_NATIVE_EXPORT(DosResetBuffer, 254),
     LX_NATIVE_EXPORT(DosSetFilePtr, 256),
     LX_NATIVE_EXPORT(DosClose, 257),
     LX_NATIVE_EXPORT(DosDelete, 259),
@@ -192,6 +193,7 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
     LX_NATIVE_EXPORT(DosSetMem, 305),
     LX_NATIVE_EXPORT(DosCreateThread, 311),
     LX_NATIVE_EXPORT(DosGetInfoBlocks, 312),
+    LX_NATIVE_EXPORT(DosLoadModule, 318),
     LX_NATIVE_EXPORT(DosQueryModuleHandle, 319),
     LX_NATIVE_EXPORT(DosQueryModuleName, 320),
     LX_NATIVE_EXPORT(DosQueryProcAddr, 321),
@@ -2540,6 +2542,67 @@ APIRET DosDevConfig(PVOID pdevinfo, ULONG item)
 
     return NO_ERROR;
 } // DosDevConfig
+
+APIRET DosLoadModule(PSZ pszName, ULONG cbName, PSZ pszModname, PHMODULE phmod)
+{
+    TRACE_NATIVE("DosLoadModule(%p, %u, '%s', %p)", pszName, (uint) cbName, pszModname, phmod);
+
+    FIXME("improve this");
+    *pszName = 0;
+
+    // !!! FIXME: there's no mutex on this global state at the moment!
+    LxModule *lxmod = GLoaderState->loadModule(pszModname);
+    if (!lxmod)
+        return ERROR_BAD_FORMAT;
+
+    *phmod = (HMODULE) lxmod;
+    return NO_ERROR;
+} // DosLoadModule
+
+
+static APIRET resetOneBuffer(const int fd)
+{
+    if (fsync(fd) == -1) {
+        switch (errno) {
+            case EBADF: return ERROR_INVALID_HANDLE;
+            case EIO: return ERROR_ACCESS_DENIED;
+            case EROFS: return ERROR_ACCESS_DENIED;
+            case EINVAL: return ERROR_INVALID_HANDLE;
+            default: break;
+        } // switch
+        return ERROR_INVALID_HANDLE;
+    } // if
+
+    return NO_ERROR;
+} // resetOneBuffer
+
+
+APIRET OS2API DosResetBuffer(HFILE hFile)
+{
+    TRACE_NATIVE("DosResetBuffer(%u)", (uint) hFile);
+
+    if (hFile == 0xFFFFFFFF) {  // flush all files.
+        // !!! FIXME: this is holding the lock the whole time...
+        APIRET err = NO_ERROR;
+        grabLock(&GMutexDosCalls);
+        for (uint32 i = 0; i < MaxHFiles; i++) {
+            const int fd = HFiles[hFile].fd;
+            if (fd != -1) {
+                const APIRET thiserr = resetOneBuffer(fd);
+                if (err == NO_ERROR)
+                    err = thiserr;
+            } // if
+        } // for
+        ungrabLock(&GMutexDosCalls);
+        return err;
+    } // if
+
+    // flush just one file.
+    const int fd = getHFileUnixDescriptor(hFile);
+    if (fd == -1)
+        return ERROR_INVALID_HANDLE;
+    return resetOneBuffer(fd);
+} // DosResetBuffer
 
 // end of doscalls.c ...
 

@@ -411,6 +411,8 @@ APIRET OS2API DosFindNext(HDIR hDir, PVOID pfindbuf, ULONG cbfindbuf, PULONG pcF
 APIRET OS2API DosFindClose(HDIR hDir);
 APIRET OS2API DosQueryCurrentDisk(PULONG pdisknum, PULONG plogical);
 APIRET OS2API DosDevConfig(PVOID pdevinfo, ULONG item);
+APIRET OS2API DosLoadModule(PSZ pszName, ULONG cbName, PSZ pszModname, PHMODULE phmod);
+APIRET OS2API DosResetBuffer(HFILE hFile);
 
 #ifdef __cplusplus
 }

@@ -194,6 +194,7 @@ typedef struct LxLoaderState
     int subprocess;
     uint16 (*initOs2Tib)(uint8 *tibspace, void *_topOfStack, const size_t stacklen, const uint32 tid);
     void (*deinitOs2Tib)(const uint16 selector);
+    LxModule *(*loadModule)(const char *modname);
 } LxLoaderState;
 
 typedef const LxExport *(*LxNativeModuleInitEntryPoint)(LxLoaderState *lx_state, uint32 *lx_num_exports);
