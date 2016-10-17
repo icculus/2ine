@@ -1732,8 +1732,8 @@ APIRET DosExecPgm(PCHAR pObjname, LONG cbObjname, ULONG execFlag, PSZ pArg, PSZ 
     } else {  // we're the parent.
         switch (execFlag) {
             case EXEC_SYNC: {
-                const int rc = waitpid(pid, &status, 0);
-                assert(rc == 0);  // !!! FIXME
+                const pid_t rc = waitpid(pid, &status, 0);
+                assert(rc == pid);  // !!! FIXME
                 setProcessResultCode(pRes, status);
                 break;
             } // case
