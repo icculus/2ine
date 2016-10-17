@@ -819,6 +819,37 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
     } // while
 } // fixupPage
 
+static int loadLxNameTable(LxModule *lxmod, const uint8 *name_table)
+{
+    for (uint32 i = 0; *name_table; i++) {
+        const uint8 namelen = *(name_table++);
+        const uint8 *nameptr = name_table;
+        name_table += namelen;
+        const uint16 ordinal = *((const uint16 *) name_table); name_table += 2;
+
+        if (ordinal == 0)
+            continue;  // skip this one.
+
+        LxExport *export = (LxExport *) lxmod->exports;
+        const uint32 num_exports = lxmod->num_exports;
+        for (uint32 i = 0; i < num_exports; i++, export++) {
+            if (export->ordinal == ordinal) {
+                char *name = (char *) malloc(namelen + 1);
+                if (!name) {
+                    fprintf(stderr, "Out of memory!\n");
+                    return 0;
+                } // if
+                memcpy(name, nameptr, namelen);
+                name[namelen] = '\0';
+                export->name = name;
+                break;
+            } // if
+        } // for
+    } // for
+
+    return 1;
+} // loadLxNameTable
+
 // !!! FIXME: break up this function.
 static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int dependency_tree_depth)
 {
@@ -1000,7 +1031,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
         if (bundletype != 0x00) {
             total_ordinals += numentries;
             entryptr += 2 + ((bundletype == 0x01) ? 3 : 5) * numentries;
-        }
+        } // if
     } // while
 
     LxExport *lxexp = (LxExport *) malloc(sizeof (LxExport) * total_ordinals);
@@ -1061,7 +1092,15 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
     retval->num_exports = (uint32) (lxexp - retval->exports);
 
     // Now load named entry points.
-    //printf("FIXME: load named entry points\n");
+    if (lx->resident_name_table_offset) {
+        if (!loadLxNameTable(retval, exe + lx->resident_name_table_offset))
+            goto loadlx_failed;
+    } // if
+
+    if (lx->non_resident_name_table_offset && lx->non_resident_name_table_len) {
+        if (!loadLxNameTable(retval, exe + lx->non_resident_name_table_offset))
+            goto loadlx_failed;
+    } // if
 
     // Load other dependencies of this module.
     const uint8 *import_modules_table = exe + lx->import_module_table_offset;
