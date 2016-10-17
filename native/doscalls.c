@@ -197,6 +197,7 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
     LX_NATIVE_EXPORT(DosQueryModuleHandle, 319),
     LX_NATIVE_EXPORT(DosQueryModuleName, 320),
     LX_NATIVE_EXPORT(DosQueryProcAddr, 321),
+    LX_NATIVE_EXPORT(DosQueryAppType, 323),
     LX_NATIVE_EXPORT(DosCreateEventSem, 324),
     LX_NATIVE_EXPORT(DosCloseEventSem, 326),
     LX_NATIVE_EXPORT(DosResetEventSem, 327),
@@ -2611,6 +2612,84 @@ APIRET OS2API DosResetBuffer(HFILE hFile)
         return ERROR_INVALID_HANDLE;
     return resetOneBuffer(fd);
 } // DosResetBuffer
+
+APIRET DosQueryAppType(PSZ pszName, PULONG pFlags)
+{
+    TRACE_NATIVE("DosQueryAppType('%s', %p)", pszName, pFlags);
+
+    if (!pFlags)
+        return ERROR_INVALID_PARAMETER;
+
+    APIRET err = NO_ERROR;
+    char *path = makeUnixPath(pszName, &err);
+    if (!path)
+        return err;
+
+    const int fd = open(path, O_RDONLY, 0);
+    free(path);
+    if (fd == -1) {
+        switch (errno) {  // !!! FIXME: copy/paste, put this in a function.
+            case EACCES: return ERROR_ACCESS_DENIED;
+            case EISDIR: return ERROR_ACCESS_DENIED;
+            case EMFILE: return ERROR_TOO_MANY_OPEN_FILES;
+            case ENFILE: return ERROR_TOO_MANY_OPEN_FILES;
+            case ENAMETOOLONG: return ERROR_FILENAME_EXCED_RANGE;
+            case ENOSPC: return ERROR_DISK_FULL;
+            case ENOMEM: return ERROR_NOT_ENOUGH_MEMORY;
+            case ENOENT: return ERROR_FILE_NOT_FOUND;  // !!! FIXME: could be PATH_NOT_FOUND too, depending on circumstances.
+            case ENOTDIR: return ERROR_PATH_NOT_FOUND;
+            case EPERM: return ERROR_ACCESS_DENIED;
+            case EROFS: return ERROR_ACCESS_DENIED;
+            case ETXTBSY: return ERROR_ACCESS_DENIED;
+            default: break;
+        } // switch
+        return ERROR_OPEN_FAILED;  // !!! FIXME: debug logging about missing errno case.
+    } // if
+
+    // !!! FIXME: I guess we should parse NE/LE files here too?
+
+    uint32 lxoffset = 0;
+    LxHeader lx;
+    uint8 mz[2];
+    if (read(fd, mz, 2) != 2) goto queryapptype_iofailed;
+    if ((mz[0] != 'M') || (mz[1] != 'Z')) goto queryapptype_iofailed;
+    if (lseek(fd, 0x3C, SEEK_SET) == -1) goto queryapptype_iofailed;
+    if (read(fd, &lxoffset, sizeof (lxoffset)) != sizeof (lxoffset)) goto queryapptype_iofailed;
+    if (lseek(fd, lxoffset, SEEK_SET) == -1) goto queryapptype_iofailed;
+    if (read(fd, &lx, sizeof (lx)) != sizeof (lx)) goto queryapptype_iofailed;
+    close(fd);
+
+    if ((lx.magic_l != 'L') || (lx.magic_x != 'X')) return ERROR_INVALID_EXE_SIGNATURE;
+    if (lx.module_flags & 0x2000) return ERROR_EXE_MARKED_INVALID;  // "not loadable" ... I guess this is it?
+
+    const uint32 module_type = lx.module_flags & 0x00038000;
+
+    ULONG flags = 0;
+
+    // !!! FIXME: can you be both compat and incompat?
+    if (lx.module_flags & 0x100) flags |= FAPPTYP_NOTWINDOWCOMPAT;
+    if (lx.module_flags & 0x200) flags |= FAPPTYP_WINDOWCOMPAT;
+    if (lx.module_flags & 0x300) flags |= FAPPTYP_WINDOWAPI;
+    // !!! FIXME: FAPPTYP_BOUND = 0x0008
+    if (module_type & 0x8000) flags |= FAPPTYP_DLL;
+    if (module_type & 0x20000) flags |= FAPPTYP_PHYSDRV;
+    if (module_type & 0x28000) flags |= FAPPTYP_VIRTDRV;
+    if (module_type & 0x18000) flags |= FAPPTYP_PROTDLL;
+
+    // !!! FIXME: FAPPTYP_DOS = 0x0020
+    // !!! FIXME: FAPPTYP_WINDOWSREAL = 0x0200
+    // !!! FIXME: FAPPTYP_WINDOWSPROT = 0x0400
+    // !!! FIXME: FAPPTYP_WINDOWSPROT31 =0x1000
+
+    flags |= FAPPTYP_32BIT;  // !!! FIXME: currently always true.
+
+    return NO_ERROR;
+
+queryapptype_iofailed:
+    close(fd);
+    return ERROR_INVALID_EXE_SIGNATURE;
+} // DosQueryAppType
+
 
 // end of doscalls.c ...
 

@@ -353,6 +353,24 @@ enum
     DEVINFO_ADAPTER
 };
 
+enum
+{
+    FAPPTYP_NOTSPEC = 0x0000,
+    FAPPTYP_NOTWINDOWCOMPAT = 0x0001,
+    FAPPTYP_WINDOWCOMPAT = 0x0002,
+    FAPPTYP_WINDOWAPI = 0x0003,
+    FAPPTYP_BOUND = 0x0008,
+    FAPPTYP_DLL = 0x0010,
+    FAPPTYP_DOS = 0x0020,
+    FAPPTYP_PHYSDRV = 0x0040,
+    FAPPTYP_VIRTDRV = 0x0080,
+    FAPPTYP_PROTDLL = 0x0100,
+    FAPPTYP_WINDOWSREAL = 0x0200,
+    FAPPTYP_WINDOWSPROT = 0x0400,
+    FAPPTYP_WINDOWSPROT31 =0x1000,
+    FAPPTYP_32BIT = 0x4000
+};
+
 
 // !!! FIXME: these should probably get sorted alphabetically and/or grouped
 // !!! FIXME:  into areas of functionality, but for now, I'm just listing them
@@ -413,6 +431,7 @@ APIRET OS2API DosQueryCurrentDisk(PULONG pdisknum, PULONG plogical);
 APIRET OS2API DosDevConfig(PVOID pdevinfo, ULONG item);
 APIRET OS2API DosLoadModule(PSZ pszName, ULONG cbName, PSZ pszModname, PHMODULE phmod);
 APIRET OS2API DosResetBuffer(HFILE hFile);
+APIRET OS2API DosQueryAppType(PSZ pszName, PULONG pFlags);
 
 #ifdef __cplusplus
 }
