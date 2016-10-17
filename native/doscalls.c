@@ -2098,19 +2098,27 @@ APIRET DosQueryCurrentDir(ULONG disknum, PBYTE pBuf, PULONG pcbBuf)
         return ERROR_NOT_ENOUGH_MEMORY;  // this doesn't ever return this error on OS/2.
 
     const size_t len = strlen(cwd);
-    if ((len + 3) > *pcbBuf) {
-        *pcbBuf = len + 3;
+    if ((len + 1) > *pcbBuf) {
+        *pcbBuf = len + 1;
+        free(cwd);
         return ERROR_BUFFER_OVERFLOW;
     } // if
 
     char *ptr = (char *) pBuf;
-    *(ptr++) = 'C';
-    *(ptr++) = ':';
-    for (char *src = cwd; *src; src++) {
+
+    char *src = cwd;
+    while (*src == '/')
+        src++;  // skip initial '/' char.
+
+    while (*src) {
         const char ch = *src;
         *(ptr++) = ((ch == '/') ? '\\' : ch);
-    } // for
+        src++;
+    } // while
+
     *ptr = '\0';
+
+    free(cwd);
 
     return NO_ERROR;
 } // DosQueryCurrentDir
