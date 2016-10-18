@@ -444,10 +444,9 @@ static void deinitOs2Tib(const uint16 selector)
 static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int argc, char **argv, char **envp)
 {
     uint8 *stack = (uint8 *) ((size_t) lxmod->esp);
-    stack -= sizeof (LxTIB) + sizeof (LxTIB2);  // skip the TIB data.
 
     // ...and you pass it the pointer to argv0. This is (at least as far as the docs suggest) appended to the environment table.
-    //fprintf(stderr, "jumping into LX land...! eip=0x%X esp=0x%X\n", (uint) lxmod->eip, (uint) lxmod->esp); fflush(stderr);
+    fprintf(stderr, "jumping into LX land for exe '%s'...! eip=%p esp=%p\n", lxmod->name, (void *) lxmod->eip, stack); fflush(stderr);
 
     GLoaderState->running = 1;
 
@@ -488,12 +487,10 @@ static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
     uint8 *stack = NULL;
 
     // force us over to OS/2 main module's stack if we aren't already on it.
-    if (!GLoaderState->running) {
+    if (!GLoaderState->running)
         stack = (uint8 *) ((size_t) GLoaderState->main_module->esp);
-        stack -= sizeof (LxTIB) + sizeof (LxTIB2);  // skip the TIB data.
-    } // if
 
-    fprintf(stderr, "jumping into LX land to %s library...! eip=0x%X esp=0x%X\n", isTermination ? "terminate" : "initialize", (uint) lxmod->eip, (uint) GLoaderState->main_module->esp); fflush(stderr);
+    fprintf(stderr, "jumping into LX land to %s library '%s'...! eip=%p esp=%p\n", isTermination ? "terminate" : "initialize", lxmod->name, (void *) lxmod->eip, stack); fflush(stderr);
 
     __asm__ __volatile__ (
         "pushal            \n\t"  // save all the current registers.
