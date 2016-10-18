@@ -304,9 +304,42 @@ static int decompressExePack2(uint8 *dst, const uint32 dstlen, const uint8 *src,
     #undef DSTAVAIL
 
     // pad out the rest of the page with zeroes.
-    memset(dst + dOf, '\0', dstlen - dOf);
+    if ((dstlen - dOf) > 0)
+        memset(dst + dOf, '\0', dstlen - dOf);
+
     return 1;
 } // decompressExePack2
+
+static int decompressIterated(uint8 *dst, uint32 dstlen, const uint8 *src, uint32 srclen)
+{
+    while (srclen) {
+        if (srclen < 4)
+            return 0;
+        const uint16 iterations = *((uint16 *) src); src += 2;
+        const uint16 len = *((uint16 *) src); src += 2;
+        srclen -= 4;
+        if (dstlen < (iterations * len))
+            return 0;
+        else if (srclen < len)
+            return 0;
+
+        for (uint16 i = 0; i < iterations; i++) {
+            memcpy(dst, src, len);
+            dst += len;
+            dstlen -= len;
+        } // for
+
+        src += len;
+        srclen -= len;
+    } // while
+
+    // pad out the rest of the page with zeroes.
+    if (dstlen > 0)
+        memset(dst, '\0', dstlen);
+
+    return 1;
+} // decompressIterated
+
 
 static void missingEntryPointCalled(const char *module, const char *entry)
 {
@@ -987,10 +1020,15 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
                     }
                     break;
 
-                //case 0x01:  // FIXME: write me ... iterated, this is exepack1, I think.
-                //    src = origexe + lx->object_iter_pages_offset + (objpage->page_data_offset << lx->page_offset_shift);
-                //    memcpy(dst, src, objpage->data_size);
-                //    break;
+                case 0x01:  // iterated data.
+                    // LX format docs say object_iter_pages_offset must be zero or equal to data_pages_offset for OS/2 2.0. So just use data_pages_offset here.
+                    //src = origexe + lx->object_iter_pages_offset + (objpage->page_data_offset << lx->page_offset_shift);
+                    src = origexe + lx->data_pages_offset + (objpage->page_data_offset << lx->page_offset_shift);
+                    if (!decompressIterated(dst, lx->page_size, src, objpage->data_size)) {
+                        fprintf(stderr, "Failed to decompress iterated object page (corrupt file or bug).\n");
+                        goto loadlx_failed;
+                    } // if
+                    break;
 
                 case 0x02: // INVALID, just zero it out.
                 case 0x03: // ZEROFILL, just zero it out.
