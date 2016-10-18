@@ -9,6 +9,7 @@
 #include <sys/mman.h>
 #include <assert.h>
 #include <dlfcn.h>
+#include <dirent.h>
 #include <pthread.h>
 
 // 16-bit selector kernel nonsense...
@@ -102,6 +103,107 @@ static char *makeOS2Path(const char *fname)
 
     return retval;
 } // makeOS2Path
+
+// based on case-insensitive search code from PhysicsFS:
+//    https://icculus.org/physfs/
+//  It's also zlib-licensed, plus I wrote it.  :)  --ryan.
+// !!! FIXME: this doesn't work as-is for UTF-8 case folding, since string
+// !!! FIXNE:  length can change!
+static int locateOneElement(char *buf)
+{
+    if (access(buf, F_OK) == 0)
+        return 1;  // quick rejection: exists in current case.
+
+    DIR *dirp;
+    char *ptr = strrchr(buf, '/');  // find entry at end of path.
+    if (ptr == NULL) {
+        dirp = opendir(".");
+        ptr = buf;
+    } else if (ptr == buf) {
+        dirp = opendir("/");
+    } else {
+        *ptr = '\0';
+        dirp = opendir(buf);
+        *ptr = '/';
+        ptr++;  // point past dirsep to entry itself.
+    } // else
+
+    for (struct dirent *dent = readdir(dirp); dent; dent = readdir(dirp)) {
+        if (strcasecmp(dent->d_name, ptr) == 0) {
+            strcpy(ptr, dent->d_name); // found a match. Overwrite with this case.
+            closedir(dirp);
+            return 1;
+        } // if
+    } // for
+
+    // no match at all...
+    closedir(dirp);
+    return 0;
+} // locateOneElement
+
+static int locatePathCaseInsensitive(char *buf)
+{
+    int rc;
+    char *ptr = buf;
+
+    if (*ptr == '\0')
+        return 0;  // Uh...I guess that's success?
+
+    if (access(buf, F_OK) == 0)
+        return 0;  // quick rejection: exists in current case.
+
+    while ( (ptr = strchr(ptr + 1, '/')) != NULL ) {
+        *ptr = '\0';  // block this path section off
+        rc = locateOneElement(buf);
+        *ptr = '/'; // restore path separator
+        if (!rc)
+            return -2;  // missing element in path.
+    } // while
+
+    // check final element...
+    return locateOneElement(buf) ? 0 : -1;
+} // locatePathCaseInsensitive
+
+static char *makeUnixPath(const char *os2path, uint32 *err)
+{
+    if ((strcasecmp(os2path, "NUL") == 0) || (strcasecmp(os2path, "\\DEV\\NUL") == 0))
+        os2path = "/dev/null";
+    // !!! FIXME: emulate other OS/2 device names (CON, etc).
+    //else if (strcasecmp(os2path, "CON") == 0)
+    else {
+        char drive = os2path[0];
+        if ((drive >= 'a') && (drive <= 'z'))
+            drive += 'A' - 'a';
+
+        if ((drive >= 'A') && (drive <= 'Z')) {
+            if (os2path[1] == ':') {  // it's a drive letter.
+                if (drive == 'C')
+                    os2path += 2;  // skip "C:" if it's there.
+                else {
+                    *err = 26; //ERROR_NOT_DOS_DISK;
+                    return NULL;
+                } // else
+            } // if
+        } // if
+    } // else
+
+    const size_t len = strlen(os2path);
+    char *retval = (char *) malloc(len + 1);
+    if (!retval) {
+        *err = 8;  //ERROR_NOT_ENOUGH_MEMORY;
+        return NULL;
+    } // else
+
+    strcpy(retval, os2path);
+
+    for (char *ptr = strchr(retval, '\\'); ptr; ptr = strchr(ptr + 1, '\\'))
+        *ptr = '/';  // convert to Unix-style path separators.
+
+    locatePathCaseInsensitive(retval);
+
+    return retval;
+} // makeUnixPath
+
 
 /* this algorithm is from lxlite 138u. */
 static int decompressExePack2(uint8 *dst, const uint32 dstlen, const uint8 *src, const uint32 srclen)
@@ -1212,6 +1314,7 @@ static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int
     // !!! FIXME: decide the right path to the file, or if it's a native replacement library.
     char fname[256];
     snprintf(fname, sizeof (fname), "%s.dll", modname);
+    locatePathCaseInsensitive(fname);
 
     LxModule *retval = NULL;
     if (access(fname, F_OK) == 0)
@@ -1366,6 +1469,9 @@ int main(int argc, char **argv, char **envp)
     GLoaderState->initOs2Tib = initOs2Tib;
     GLoaderState->deinitOs2Tib = deinitOs2Tib;
     GLoaderState->loadModule = loadLxModuleByModuleName;
+    GLoaderState->locatePathCaseInsensitive = locatePathCaseInsensitive;
+    GLoaderState->makeUnixPath = makeUnixPath;
+    GLoaderState->makeOS2Path = makeOS2Path;
 
     const char *modulename = GLoaderState->subprocess ? envr : argv[1];
 
