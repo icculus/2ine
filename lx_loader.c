@@ -1162,10 +1162,10 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
         } // for
 
         // !!! FIXME: hack to nop out some 16-bit code in emx.dll startup...
-        if (strcmp(modname, "EMX") == 0) {
+        if ((i == 1) && (strcasecmp(modname, "EMX") == 0)) {
             // This is the 16-bit signal handler installer. nop it out.
             uint8 *ptr = ((uint8 *) retval->mmaps[1].addr) + 28596;
-            for (uint32 i = 0; i < 37; i++)
+            for (uint32 j = 0; j < 37; j++)
                 *(ptr++) = 0x90; // nop
         } // if
 
