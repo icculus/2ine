@@ -284,10 +284,44 @@ static void parseExe(const char *exefname, uint8 *exe, uint32 exelen)
                         printf("Additive: %u\n", (uint) additive);
                         break;
 
-                    case 0x2:
+                    case 0x2: {
                         printf("Import by name fixup record:\n");
-                        printf("WRITE ME\n"); exit(1);
+                        if (fixupflags & 0x40) { // 16 bit value
+                            const uint16 val = *((uint16 *) fixup); fixup += 2;
+                            printf("Module ordinal: %u\n", (uint) val);
+                        } else {
+                            const uint8 val = *(fixup++);
+                            printf("Module ordinal: %u\n", (uint) val);
+                        } // else
+
+                        uint32 name_offset = 0;
+                        if (fixupflags & 0x10) {  // 32-bit value
+                            name_offset = *((uint32 *) fixup); fixup += 4;
+                        } else {  // 16-bit value
+                            name_offset = *((uint16 *) fixup); fixup += 2;
+                        } // else
+
+                        const uint8 *import_name = (exe + lx->import_proc_table_offset) + name_offset;
+                        char name[128];
+                        const uint8 namelen = *(import_name++) & 0x7F;
+                        memcpy(name, import_name, namelen);
+                        name[namelen] = '\0';
+                        printf("Name offset: %u ('%s')\n", (uint) name_offset, name);
+
+                        uint32 additive = 0;
+                        if (fixupflags & 0x4) {  // Has additive.
+                            if (fixupflags & 0x20) { // 32-bit value
+                                additive = *((uint32 *) fixup);
+                                fixup += 4;
+                            } else {  // 16-bit value
+                                additive = *((uint16 *) fixup);
+                                fixup += 2;
+                            } // else
+                        } // if
+                        printf("Additive: %u\n", (uint) additive);
+
                         break;
+                    } // case
 
                     case 0x3:
                         printf("Internal entry table fixup record:\n");
@@ -473,20 +507,6 @@ static void parseExe(const char *exefname, uint8 *exe, uint32 exelen)
         const uint16 ordinal = *((const uint16 *) name_table); name_table += 2;
         printf("%u: '%s' (ordinal %u)\n", (uint) i, name, (uint) ordinal);
     } // for
-
-#if 0
-    const uint8 *fixup_record_table = exe + fixup_record_table_offset;
-    const uint8 *import_proc_table = exe + lx->import_proc_table_offset;
-    for (uint32 i = 0; i < 1000; i++) {
-        char name[128];
-        const uint8 namelen = *(import_proc_table++) & 0x7F;
-        // !!! FIXME: name can't be more than 127 chars, according to docs. Check this.
-        memcpy(name, import_proc_table, namelen);
-        import_proc_table += namelen;
-        name[namelen] = '\0';
-        printf("PROC: %s\n", name);
-    }
-#endif
 } // parseExe
 
 int main(int argc, char **argv)

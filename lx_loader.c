@@ -525,14 +525,13 @@ static void *getModuleProcAddrByOrdinal(const LxModule *module, const uint32 ord
 
     #if 1
     char entry[128];
-    snprintf(entry, sizeof (entry), "ORDINAL_%u", (uint) ordinal);
+    snprintf(entry, sizeof (entry), "ordinal #%u", (uint) ordinal);
     return generateMissingTrampoline(module->name, entry);
     #else
     return NULL;
     #endif
 } // getModuleProcAddrByOrdinal
 
-#if 0
 static void *getModuleProcAddrByName(const LxModule *module, const char *name)
 {
     //printf("lookup module == '%s', name == '%s'\n", module->name, name);
@@ -549,7 +548,6 @@ static void *getModuleProcAddrByName(const LxModule *module, const char *name)
     return NULL;
     #endif
 } // getModuleProcAddrByName
-#endif
 
 static void doFixup(uint8 *page, const sint16 offset, const uint32 finalval, const uint16 finalval2, const uint32 finalsize)
 {
@@ -677,8 +675,32 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
             } // case
 
             case 0x2: { // Import by name fixup record
-                fprintf(stderr, "FIXUP 0x2 WRITE ME\n");
-                exit(1);
+                uint16 moduleid = 0;  // module ordinal
+                if (fixupflags & 0x40) { // 16 bit value
+                    moduleid = *((uint16 *) fixup); fixup += 2;
+                } else {
+                    moduleid = (uint16) *(fixup++);
+                } // else
+
+                uint32 name_offset = 0;
+                if (fixupflags & 0x10) {  // 32-bit value
+                    name_offset = *((uint32 *) fixup); fixup += 4;
+                } else {  // 16-bit value
+                    name_offset = *((uint16 *) fixup); fixup += 2;
+                } // else
+
+                if (moduleid == 0) {
+                    fprintf(stderr, "uhoh, looking for module ordinal 0, which is illegal.\n");
+                } else if (moduleid > lx->num_import_mod_entries) {
+                    fprintf(stderr, "uhoh, looking for module ordinal %u, but only %u available.\n", (uint) moduleid, (uint) lx->num_import_mod_entries);
+                } else {
+                    const uint8 *import_name = (exe + lx->import_proc_table_offset) + name_offset;
+                    char name[128];
+                    const uint8 namelen = *(import_name++) & 0x7F;  // the top bit is reserved.
+                    memcpy(name, import_name, namelen);
+                    name[namelen] = '\0';
+                    finalval = (uint32) (size_t) getModuleProcAddrByName(lxmod->dependencies[moduleid-1], name);
+                } // else
                 break;
             } // case
 
@@ -1038,7 +1060,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
         } // for
 
         // !!! FIXME: hack to nop out some 16-bit code in emx.dll startup...
-        if ((i == 1) && (strcmp(modname, "EMX") == 0)) {
+        if (strcmp(modname, "EMX") == 0) {
             // This is the 16-bit signal handler installer. nop it out.
             uint8 *ptr = ((uint8 *) retval->mmaps[1].addr) + 28596;
             for (uint32 i = 0; i < 37; i++)
