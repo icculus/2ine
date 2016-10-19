@@ -168,6 +168,7 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
     LX_NATIVE_EXPORT(DosQueryPathInfo, 223),
     LX_NATIVE_EXPORT(DosQueryHType, 224),
     LX_NATIVE_EXPORT(DosScanEnv, 227),
+    LX_NATIVE_EXPORT(DosSleep, 229),
     LX_NATIVE_EXPORT(DosGetDateTime, 230),
     LX_NATIVE_EXPORT(DosDevConfig, 231),
     LX_NATIVE_EXPORT(DosExit, 234),
