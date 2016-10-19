@@ -195,7 +195,8 @@ typedef struct LxPIB
 
 #pragma pack(pop)
 
-#define LXTIBSIZE (sizeof (LxTIB) + sizeof (LxTIB2))
+// We put the 128 bytes of TLS slots after the TIB structs.
+#define LXTIBSIZE (sizeof (LxTIB) + sizeof (LxTIB2) + 128)
 
 typedef struct LxLoaderState
 {
@@ -204,6 +205,9 @@ typedef struct LxLoaderState
     LxPIB pib;
     int subprocess;
     int running;
+    uint32 *tlspage;
+    uint32 tlsmask;  // one bit for each TLS slot in use.
+    uint8 tlsallocs[32];  // number of TLS slots allocated in one block, indexed by starting block (zero if not the starting block).
     uint16 (*initOs2Tib)(uint8 *tibspace, void *_topOfStack, const size_t stacklen, const uint32 tid);
     void (*deinitOs2Tib)(const uint16 selector);
     LxModule *(*loadModule)(const char *modname);

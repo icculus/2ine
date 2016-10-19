@@ -432,6 +432,8 @@ APIRET OS2API DosDevConfig(PVOID pdevinfo, ULONG item);
 APIRET OS2API DosLoadModule(PSZ pszName, ULONG cbName, PSZ pszModname, PHMODULE phmod);
 APIRET OS2API DosResetBuffer(HFILE hFile);
 APIRET OS2API DosQueryAppType(PSZ pszName, PULONG pFlags);
+APIRET OS2API DosAllocThreadLocalMemory(ULONG cb, PULONG *p);
+APIRET OS2API DosFreeThreadLocalMemory(ULONG *p);
 
 #ifdef __cplusplus
 }

@@ -14,6 +14,7 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
 
 #include "os2native.h"
 #include "doscalls.h"
@@ -218,6 +219,8 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
     LX_NATIVE_EXPORT(DosExitMustComplete, 381),
     LX_NATIVE_EXPORT(DosSetRelMaxFH, 382),
     LX_NATIVE_EXPORT(DosFlatToSel, 425),
+    LX_NATIVE_EXPORT(DosAllocThreadLocalMemory, 454),
+    LX_NATIVE_EXPORT(DosFreeThreadLocalMemory, 455),
     LX_NATIVE_EXPORT(DosOpenL, 981)
 LX_NATIVE_MODULE_INIT_END()
 
@@ -1309,6 +1312,7 @@ static void *os2ThreadEntry(void *arg)
 {
     // put our thread's TIB structs on the stack and call that the top of the stack.
     uint8 tibspace[LXTIBSIZE];
+    memset(tibspace, '\0', LXTIBSIZE);  // make sure TLS slots are clear, etc.
     os2ThreadEntry2(tibspace, (Thread *) arg);
     return NULL;  // OS/2 threads don't return a value here.
 } // os2ThreadEntry
@@ -2581,6 +2585,106 @@ queryapptype_iofailed:
     return ERROR_INVALID_EXE_SIGNATURE;
 } // DosQueryAppType
 
+static uint32 *initTLSPage(void)
+{
+    const int pagesize = getpagesize();
+
+    void *addr = mmap(NULL, pagesize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (addr == ((void *) MAP_FAILED))
+        return NULL;
+
+    // Fill in the page with a debug info string.
+    char *dst = (char *) addr;
+    const char *str = "This is the fake OS/2 TLS page. ";
+    assert(strlen(str) == 32);
+    for (int i = 0; i < 127; i++, dst += 32)
+        strcpy(dst, str);
+    memcpy(dst, str, 31);
+    dst[31] = '\0';
+
+    if (mprotect(addr, pagesize, PROT_NONE) == -1) {
+        munmap(addr, pagesize);
+        return NULL;
+    } // if
+
+    printf("allocated magic OS/2 TLS page at %p\n", addr); fflush(stdout);
+
+    return (uint32 *) addr;
+} // initTLSPage
+
+
+APIRET DosAllocThreadLocalMemory(ULONG cb, PULONG *p)
+{
+    TRACE_NATIVE("DosAllocThreadLocalMemory(%u, %p)", (uint) cb, p);
+
+    if (cb > 8)  // this is a limitation in OS/2. This whole API is weird.
+        return ERROR_INVALID_PARAMETER;
+    else if (!p)
+        return ERROR_INVALID_PARAMETER;
+
+    APIRET retval = NO_ERROR;
+    uint32 mask = 0xFF >> (8 - cb);
+
+    grabLock(&GMutexDosCalls);
+
+    // this is probably expensive to do with the mutex held, but honestly,
+    //  is there a lot of thread contention at the point where your app is
+    //  allocating TLS?
+    if (GLoaderState->tlspage == NULL) {
+        if ((GLoaderState->tlspage = initTLSPage()) == NULL) {
+            ungrabLock(&GMutexDosCalls);
+            return ERROR_NOT_ENOUGH_MEMORY;
+        } // if
+    } // if
+
+    int i;
+    for (i = 0; i < 32; i++, mask <<= 1) {
+        if (((GLoaderState->tlsmask ^ mask) & mask) == mask)
+            break;
+    } // for
+
+    if (i == 32)
+        retval = ERROR_NOT_ENOUGH_MEMORY; // there are only 32 slots, couldn't find anything contiguous.
+    else {
+        assert(GLoaderState->tlsallocs[i] == 0);
+        GLoaderState->tlsallocs[i] = (uint8) cb;
+        GLoaderState->tlsmask |= mask;
+        *p = GLoaderState->tlspage + i;
+        printf("allocated %u OS/2 TLS slot%s at %p\n", (uint) cb, (cb == 1) ? "" : "s", *p); fflush(stdout);
+    } // else
+        
+    ungrabLock(&GMutexDosCalls);
+
+    return retval;
+} // DosAllocThreadLocalMemory
+
+APIRET DosFreeThreadLocalMemory(ULONG *p)
+{
+    TRACE_NATIVE("DosFreeThreadLocalMemory(%p)", p);
+
+    APIRET retval = ERROR_INVALID_PARAMETER;
+
+    grabLock(&GMutexDosCalls);
+
+    if (GLoaderState->tlspage) {
+        const uint32 slot = (uint32) (p - GLoaderState->tlspage);
+        if (slot < 32) {
+            const uint8 slots = GLoaderState->tlsallocs[slot];
+            if (slots > 0) {
+                const uint32 mask = ((uint32) (0xFF >> (8 - slots))) << slot;
+                assert((GLoaderState->tlsmask & mask) == mask);
+                GLoaderState->tlsmask &= ~mask;
+                printf("freed %u OS/2 TLS slot%s at %p\n", (uint) slots, (slots == 1) ? "" : "s", p); fflush(stdout);
+                GLoaderState->tlsallocs[slot] = 0;
+                retval = NO_ERROR;
+            } // if
+        } // if
+    } // if
+
+    ungrabLock(&GMutexDosCalls);
+
+    return retval;
+} // DosFreeThreadLocalMemory
 
 // end of doscalls.c ...
 
