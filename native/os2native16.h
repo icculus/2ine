@@ -6,7 +6,6 @@
 // !!! FIXME: _lots_ of macro salsa in here.
 
 #define LX_NATIVE_MODULE_16BIT_SUPPORT() \
-    static LxLoaderState *GLoaderState = NULL; \
     static LxMmaps obj16;
 
 // These are the 16-bit entry points, which are exported to the LX loader
@@ -26,11 +25,8 @@
     obj16.mapped = obj16.addr = NULL; \
     obj16.size = 0; \
     obj16.alias = 0xFFFF; \
-    GLoaderState = NULL;
 
 #define LX_NATIVE_MODULE_INIT_16BIT_SUPPORT() \
-    GLoaderState = lx_state; \
-    \
     obj16.mapped = obj16.addr = NULL; \
     obj16.size = 0; \
     obj16.alias = 0xFFFF; \
@@ -39,7 +35,6 @@
     void *mmapaddr = mmap(NULL, vsize, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0); \
     if (mmapaddr == ((void *) MAP_FAILED)) { \
         fprintf(stderr, "mmap(NULL, 0x20000, RW-, ANON|PRIVATE, -1, 0) failed (%d): %s\n", errno, strerror(errno)); \
-        GLoaderState = NULL; \
         return 0; \
     } \
     \
@@ -62,7 +57,6 @@
         obj16.mapped = obj16.addr = NULL; \
         obj16.size = 0; \
         obj16.alias = 0xFFFF; \
-        GLoaderState = NULL; \
         return 0; \
     } \
     assert(offset == 0); \
@@ -115,7 +109,7 @@ MOV SP, BX
 RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling convention!) with retval in AX.
 */
 
-#define LX_NATIVE_INIT_16BIT_BRIDGE(fn, argbytes) \
+#define LX_NATIVE_INIT_16BIT_BRIDGE(fn, argbytes) { \
     fn##16 = ptr; \
     \
     /* instructions are in Intel syntax here, not AT&T. */ \
@@ -192,9 +186,9 @@ RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling
     *(ptr++) = 0xCA;  /* retf 0x22... */ \
     const uint16 argbytecount = argbytes; \
     memcpy(ptr, &argbytecount, 2); ptr += 2; \
+}
 
-
-#define LX_NATIVE_MODULE_INIT_16BIT_SUPPORT_END() \
+#define LX_NATIVE_MODULE_INIT_16BIT_SUPPORT_END() { \
     assert((((uint32)ptr) - ((uint32)mmapaddr)) < 0x10000);  /* don't be more than 64k. */ \
     if (mprotect(obj16.mapped, vsize, PROT_READ | PROT_EXEC) == -1) { \
         fprintf(stderr, "mprotect() failed for 16-bit bridge code!\n"); \
@@ -203,9 +197,9 @@ RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling
         obj16.mapped = obj16.addr = NULL; \
         obj16.size = 0; \
         obj16.alias = 0xFFFF; \
-        GLoaderState = NULL; \
         return 0; \
     } \
+}
 
 #define LX_NATIVE_EXPORT16(fn, ord) { ord, #fn, &fn##16, &obj16 }
 

@@ -16,8 +16,11 @@
 #include "os2errors.h"
 #include "../lx_loader.h"
 
-#if 0
-#define TRACE_NATIVE(...) do { fprintf(stderr, "2INE TRACE [%lu]: ", (unsigned long) pthread_self()); fprintf(stderr, __VA_ARGS__); fprintf(stderr, ";\n"); } while (0)
+// note that this is defined in _every_ module that includes this file!
+static LxLoaderState *GLoaderState = NULL;
+
+#if 1
+#define TRACE_NATIVE(...) do { if (GLoaderState->trace_native) { fprintf(stderr, "2INE TRACE [%lu]: ", (unsigned long) pthread_self()); fprintf(stderr, __VA_ARGS__); fprintf(stderr, ";\n"); } } while (0)
 #else
 #define TRACE_NATIVE(...) do {} while (0)
 #endif
@@ -26,10 +29,14 @@ OS2EXPORT const LxExport * lxNativeModuleInit(LxLoaderState *lx_state, uint32 *l
 void OS2EXPORT lxNativeModuleDeinit(void);
 
 #define LX_NATIVE_MODULE_DEINIT(deinitcode) \
-    void lxNativeModuleDeinit(void) { deinitcode; }
+    void lxNativeModuleDeinit(void) { \
+        deinitcode; \
+        GLoaderState = NULL; \
+    }
 
 #define LX_NATIVE_MODULE_INIT(initcode) \
     const LxExport *lxNativeModuleInit(LxLoaderState *lx_state, uint32 *lx_num_exports) { \
+        GLoaderState = lx_state; \
         initcode; \
         static const LxExport lx_native_exports[] = {
 

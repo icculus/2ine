@@ -215,6 +215,8 @@ typedef struct LxLoaderState
     uint16 original_ss;
     uint16 original_ds;
     uint32 ldt[8192];
+    char *libpath;
+    uint32 libpathlen;
     uint32 *tlspage;
     uint32 tlsmask;  // one bit for each TLS slot in use.
     uint8 tlsallocs[32];  // number of TLS slots allocated in one block, indexed by starting block (zero if not the starting block).

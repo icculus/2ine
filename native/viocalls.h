@@ -35,6 +35,7 @@ enum
 };
 
 APIRET16 OS2API16 VioGetMode(PVIOMODEINFO pvioModeInfo, HVIO hvio);
+APIRET16 OS2API16 VioGetCurPos(PUSHORT pusRow, PUSHORT pusColumn, HVIO hvio);
 
 #ifdef __cplusplus
 }

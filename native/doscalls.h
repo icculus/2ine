@@ -371,6 +371,13 @@ enum
     FAPPTYP_32BIT = 0x4000
 };
 
+enum
+{
+    BEGIN_LIBPATH = 1,
+    END_LIBPATH = 2
+};
+
+typedef void *PCONTEXTRECORD;  // !!! FIXME
 
 // !!! FIXME: these should probably get sorted alphabetically and/or grouped
 // !!! FIXME:  into areas of functionality, but for now, I'm just listing them
@@ -434,6 +441,10 @@ APIRET OS2API DosResetBuffer(HFILE hFile);
 APIRET OS2API DosQueryAppType(PSZ pszName, PULONG pFlags);
 APIRET OS2API DosAllocThreadLocalMemory(ULONG cb, PULONG *p);
 APIRET OS2API DosFreeThreadLocalMemory(ULONG *p);
+APIRET OS2API DosQueryFHState(HFILE hFile, PULONG pMode);
+APIRET OS2API DosQueryExtLIBPATH(PSZ pszExtLIBPATH, ULONG flags);
+APIRET OS2API DosSetMaxFH(ULONG cFH);
+APIRET OS2API DosQueryThreadContext(TID tid, ULONG level, PCONTEXTRECORD pcxt);
 
 #ifdef __cplusplus
 }

@@ -1470,10 +1470,18 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
                 *(ptr++) = 0x90; // nop
         } // if
 
+        // !!! FIXME: hack for Java that fails to mark a code page as executable
+        // !!! FIXME:  (on 386 machines, read implies execute, so this error could go unnoticed).
+        uint32 object_flags = obj->object_flags;
+        if ((i == 4) && (strcasecmp(modname, "HPI") == 0)) {
+            fprintf(stderr, "fixed page permissions to workaround bug in Java DLL\n");
+            object_flags |= 0x4;
+        } // if
+
         // Now set all the pages of this object to the proper final permissions...
-        const int prot = ((obj->object_flags & 0x1) ? PROT_READ : 0) |
-                         ((obj->object_flags & 0x2) ? PROT_WRITE : 0) |
-                         ((obj->object_flags & 0x4) ? PROT_EXEC : 0);
+        const int prot = ((object_flags & 0x1) ? PROT_READ : 0) |
+                         ((object_flags & 0x2) ? PROT_WRITE : 0) |
+                         ((object_flags & 0x4) ? PROT_EXEC : 0);
 
         if (mprotect(retval->mmaps[i].mapped, retval->mmaps[i].size, prot) == -1) {
             fprintf(stderr, "mprotect(%p, %u, %s%s%s, ANON|PRIVATE|FIXED, -1, 0) failed (%d): %s\n",
@@ -1692,12 +1700,15 @@ static void initPib(LxPIB *pib, const int argc, char **argv, char **envp)
         exit(1);
     } // if
 
+    const char *libpath = NULL;
     char *ptr = env;
     for (int i = 0; envp[i]; i++) {
         const char *str = envp[i];
         if (strncmp(str, "PATH=", 5) == 0) {
             if (!GLoaderState->subprocess)
                 str = default_os2path;
+        } else if (strncmp(str, "LIBPATH=", 8) == 0) {
+            libpath = str + 8;
         } else if (strncmp(str, "IS_2INE=", 8) == 0) {
             continue;
         } // if
@@ -1706,6 +1717,15 @@ static void initPib(LxPIB *pib, const int argc, char **argv, char **envp)
         ptr += strlen(str) + 1;
     }
     *(ptr++) = '\0';
+
+    // we keep a copy of LIBPATH for undocumented API
+    //  DosQueryHandleInfo(..., QHINF_LIBPATH, ...). I guess in case the app
+    //  has changed the environment var after start? Java uses this.
+    if (libpath == NULL)
+        libpath = "";
+
+    GLoaderState->libpath = strdup(libpath);
+    GLoaderState->libpathlen = strlen(libpath) + 1;
 
     // put the exe name between the environment and the command line.
     strcpy(ptr, argv[0]);
@@ -1758,6 +1778,23 @@ static LxModule *loadLxModuleByModuleName(const char *modname)
     return loadLxModuleByModuleNameInternal(modname, 0);
 } // loadLxModuleByModuleName
 
+static LxModule *loadLxModuleByPathOrModuleName(const char *modname)
+{
+    LxModule *retval = NULL;
+    // !!! FIXME: can a module name be specified as "NAME.DLL" and not be considered a filename?
+    if (strrchr(modname, '.') == NULL) {
+        retval = loadLxModuleByModuleName(modname);
+    } else {
+        uint32 err = 0;
+        char *path = makeUnixPath(modname, &err);
+        if (!path)
+            return NULL;
+        retval = loadLxModuleByPath(path);
+        free(path);
+    } // else
+    return retval;
+} // loadLxModuleByPathOrModuleName
+
 static __attribute__((noreturn)) void handleThreadLocalStorageAccess(const int slot, ucontext_t *uctx)
 {
     greg_t *gregs = uctx->uc_mcontext.gregs;
@@ -1775,7 +1812,7 @@ static __attribute__((noreturn)) void handleThreadLocalStorageAccess(const int s
     uint32 *tls = (uint32 *) (ptib2 + 1);  // The thread's TLS data is stored right after its TIB2 struct.
     tls += slot;
 
-    printf("We wanted to access thread %p TLS slot %d (currently holds %u)\n", tls - slot, slot, (uint) *tls);
+    //printf("We wanted to access thread %p TLS slot %d (currently holds %u)\n", tls - slot, slot, (uint) *tls);
 
     static const int x86RegisterToUContextEnum[] = {
         REG_EAX, REG_ECX, REG_EDX, REG_EBX, REG_ESP, REG_EBP, REG_ESI, REG_EDI
@@ -1786,19 +1823,19 @@ static __attribute__((noreturn)) void handleThreadLocalStorageAccess(const int s
     uint8 *eip = (void *) (size_t) gregs[REG_EIP];  // program counter at point of segfault.
     switch (eip[0]) {
         case 0xC7:  // mov imm16/32 -> r/m
-            printf("setting TLS slot %d to imm %u.\n", slot, (uint) *((uint32 *) (eip + 2)));
+            //printf("setting TLS slot %d to imm %u.\n", slot, (uint) *((uint32 *) (eip + 2)));
             *tls = *((uint32 *) (eip + 2));  // !!! FIXME: verify it's a imm32, not 16
             gregs[REG_EIP] += 6;
             break;
 
         case 0x89:  // mov r -> r/m
-            printf("setting TLS slot %d to reg %d (%u).\n", slot, x86RegisterToUContextEnum[eip[1] >> 3], (uint) gregs[x86RegisterToUContextEnum[eip[1] >> 3]]);
+            //printf("setting TLS slot %d to reg %d (%u).\n", slot, x86RegisterToUContextEnum[eip[1] >> 3], (uint) gregs[x86RegisterToUContextEnum[eip[1] >> 3]]);
             *tls = (uint32) gregs[x86RegisterToUContextEnum[eip[1] >> 3]];
             gregs[REG_EIP] += 2;
             break;
 
         case 0x8B:  // mov r/m -> r
-            printf("setting to reg %d to TLS slot %d (%u).\n", (uint) x86RegisterToUContextEnum[eip[1] >> 3], slot, *tls);
+            //printf("setting reg %d to TLS slot %d (%u).\n", (uint) x86RegisterToUContextEnum[eip[1] >> 3], slot, *tls);
             gregs[x86RegisterToUContextEnum[eip[1] >> 3]] = (greg_t) *tls;
             gregs[REG_EIP] += 2;
             break;
@@ -1813,7 +1850,7 @@ static __attribute__((noreturn)) void handleThreadLocalStorageAccess(const int s
     } else {
         // drop out of signal handler to (hopefully) next instruction in the app,
         //  as if it accessed the TLS slot normally and none of this ever happened.
-        printf("TLS access handler jumping back into app at %p...\n", (void *) gregs[REG_EIP]); fflush(stdout);
+        //printf("TLS access handler jumping back into app at %p...\n", (void *) gregs[REG_EIP]); fflush(stdout);
         setcontext(uctx);
         fprintf(stderr, "panic: setcontext() failed in the TLS access handler! Aborting! (%s)\n", strerror(errno));
     } // else
@@ -1841,6 +1878,7 @@ static void segfault_catcher(int sig, siginfo_t *info, void *ctx)
         // !!! FIXME: case #1 should be a much more detailed crash dump.
         case 1: fprintf(stderr, "SIGSEGV at addr=%p (eip=%p)\n", addr, (void *) ((ucontext_t *) ctx)->uc_mcontext.gregs[REG_EIP]); break;
         case 2: write(2, "SIGSEGV, aborting.\n", 19); break;
+        default: break;
     } // switch
 
     abort();  // cash out.
@@ -1855,7 +1893,7 @@ static int installSignalHandlers(void)
     action.sa_flags = SA_NODEFER | SA_SIGINFO;
 
     if (sigaction(SIGSEGV, &action, NULL) == -1) {
-        fprintf(stderr, "Couldn't install signal handler! (%s)\n", strerror(errno));
+        fprintf(stderr, "Couldn't install SIGSEGV handler! (%s)\n", strerror(errno));
         return 0;
     } // if
 
@@ -1890,7 +1928,7 @@ int main(int argc, char **argv, char **envp)
     GLoaderState->findSelector = findSelector;
     GLoaderState->freeSelector = freeSelector;
     GLoaderState->convert1616to32 = convert1616to32;
-    GLoaderState->loadModule = loadLxModuleByModuleName;
+    GLoaderState->loadModule = loadLxModuleByPathOrModuleName;
     GLoaderState->locatePathCaseInsensitive = locatePathCaseInsensitive;
     GLoaderState->makeUnixPath = makeUnixPath;
     GLoaderState->makeOS2Path = makeOS2Path;

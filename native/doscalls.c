@@ -14,7 +14,28 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 
-static LxLoaderState *GLoaderState = NULL;
+// DosQueryHeaderInfo() is an undocumented OS/2 API that is exported from DOSCALLS. Java uses it.
+//  This isn't mentioned in the docs or the SDK (beyond the ordinal being listed). I got the basic details
+//  from Odin32, which lists it in their os2newapi.h header.
+enum
+{
+    QHINF_EXEINFO = 1,
+    QHINF_READRSRCTBL,
+    QHINF_READFILE,
+    QHINF_LIBPATHLENGTH,
+    QHINF_LIBPATH,
+    QHINF_FIXENTRY,
+    QHINF_STE,
+    QHINF_MAPSEL
+};
+APIRET OS2API DosQueryHeaderInfo(HMODULE hmod, ULONG ulIndex, PVOID pvBuffer, ULONG cbBuffer, ULONG ulSubFunction);
+
+// This is also undocumented (thanks, EDM/2!). Of course, Java uses it.
+APIRET OS2API DosQuerySysState(ULONG func, ULONG arg1, ULONG pid, ULONG _res_, PVOID buf, ULONG bufsz);
+
+// This is also undocumented (no idea about this at all, including function params). Of course, Java uses it.
+APIRET DosR3ExitAddr(void);
+
 
 static pthread_mutex_t GMutexDosCalls;
 
@@ -54,9 +75,10 @@ enum {
 
 typedef struct HFileInfo
 {
-    int fd;
-    ULONG type;
-    ULONG attr;
+    int fd;       // unix file descriptor.
+    ULONG type;   // file, pipe, device, etc.
+    ULONG attr;   // for character devices, DAW_*
+    ULONG flags;  // OPEN_FLAGS_*
 } HFileInfo;
 
 static HFileInfo *HFiles = NULL;
@@ -95,11 +117,6 @@ typedef struct
 static DirFinder GHDir1;
 
 
-// !!! FIXME:
-#undef TRACE_NATIVE
-#define TRACE_NATIVE(...) do { if (GLoaderState->trace_native) { fprintf(stderr, "2INE TRACE [%lu]: ", (unsigned long) pthread_self()); fprintf(stderr, __VA_ARGS__); fprintf(stderr, ";\n"); } } while (0)
-
-
 LX_NATIVE_MODULE_DEINIT({
     ExitListItem *next = GExitList;
     GExitList = NULL;
@@ -118,14 +135,10 @@ LX_NATIVE_MODULE_DEINIT({
     MaxHFiles = 0;
 
     pthread_mutex_destroy(&GMutexDosCalls);
-
-    GLoaderState = NULL;
 })
 
-static int initDoscalls(LxLoaderState *lx_state)
+static int initDoscalls(void)
 {
-    GLoaderState = lx_state;
-
     if (pthread_mutex_init(&GMutexDosCalls, NULL) == -1) {
         fprintf(stderr, "pthread_mutex_init failed!\n");
         return 0;
@@ -143,6 +156,7 @@ static int initDoscalls(LxLoaderState *lx_state)
         info->fd = -1;
         info->type = 0;
         info->attr = 0;
+        info->flags = 0;
     } // for
 
     // launching a Hello World program from CMD.EXE seems to inherit several
@@ -164,7 +178,8 @@ static int initDoscalls(LxLoaderState *lx_state)
     return 1;
 } // initDoscalls
 
-LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
+LX_NATIVE_MODULE_INIT({ if (!initDoscalls()) return NULL; })
+    LX_NATIVE_EXPORT(DosSetMaxFH, 209),
     LX_NATIVE_EXPORT(DosSetPathInfo, 219),
     LX_NATIVE_EXPORT(DosQueryPathInfo, 223),
     LX_NATIVE_EXPORT(DosQueryHType, 224),
@@ -183,6 +198,7 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
     LX_NATIVE_EXPORT(DosOpen, 273),
     LX_NATIVE_EXPORT(DosQueryCurrentDir, 274),
     LX_NATIVE_EXPORT(DosQueryCurrentDisk, 275),
+    LX_NATIVE_EXPORT(DosQueryFHState, 276),
     LX_NATIVE_EXPORT(DosQueryFileInfo, 279),
     LX_NATIVE_EXPORT(DosWaitChild, 280),
     LX_NATIVE_EXPORT(DosRead, 281),
@@ -214,6 +230,7 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
     LX_NATIVE_EXPORT(DosSubFreeMem, 346),
     LX_NATIVE_EXPORT(DosQuerySysInfo, 348),
     LX_NATIVE_EXPORT(DosSetExceptionHandler, 354),
+    LX_NATIVE_EXPORT(DosQuerySysState, 368),
     LX_NATIVE_EXPORT(DosSetSignalExceptionFocus, 378),
     LX_NATIVE_EXPORT(DosEnterMustComplete, 380),
     LX_NATIVE_EXPORT(DosExitMustComplete, 381),
@@ -221,6 +238,10 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls(lx_state)) return NULL; })
     LX_NATIVE_EXPORT(DosFlatToSel, 425),
     LX_NATIVE_EXPORT(DosAllocThreadLocalMemory, 454),
     LX_NATIVE_EXPORT(DosFreeThreadLocalMemory, 455),
+    LX_NATIVE_EXPORT(DosR3ExitAddr, 553),
+    LX_NATIVE_EXPORT(DosQueryHeaderInfo, 582),
+    LX_NATIVE_EXPORT(DosQueryExtLIBPATH, 874),
+    LX_NATIVE_EXPORT(DosQueryThreadContext, 877),
     LX_NATIVE_EXPORT(DosOpenL, 981)
 LX_NATIVE_MODULE_INIT_END()
 
@@ -364,7 +385,7 @@ APIRET DosQueryModuleName(HMODULE hmod, ULONG buflen, PCHAR buf)
 
     const LxModule *lxmod = (LxModule *) hmod;
     // !!! FIXME: error 6 ERROR_INVALID_HANDLE
-    if (strlen(lxmod->os2path) <= buflen)
+    if (strlen(lxmod->os2path) >= buflen)
         return ERROR_BAD_LENGTH;
     strcpy(buf, lxmod->os2path);
     return NO_ERROR;
@@ -683,6 +704,7 @@ APIRET DosSetRelMaxFH(PLONG pincr, PULONG pcurrent)
                     info->fd = -1;
                     info->type = 0;
                     info->attr = 0;
+                    info->flags = 0;
                 } // for
                 MaxHFiles += incr;
             } // if
@@ -954,6 +976,8 @@ static APIRET doDosOpen(PSZ pszFileName, PHFILE pHf, PULONG pulAction, LONGLONG 
         } // switch
         __builtin_unreachable();
     } // if
+
+    info->flags = fsOpenFlags;
 
     if (isReplacing)
         *pulAction = FILE_TRUNCATED;
@@ -1244,6 +1268,12 @@ static APIRET queryPathInfo(PSZ unixPath, ULONG ulInfoLevel, PVOID pInfoBuf, ULO
         case FIL_STANDARD: return queryPathInfoStandard(unixPath, pInfoBuf, cbInfoBuf);
         case FIL_QUERYEASIZE: return queryPathInfoEaSize(unixPath, pInfoBuf, cbInfoBuf);
         case FIL_QUERYEASFROMLIST: return queryPathInfoEasFromList(unixPath, pInfoBuf, cbInfoBuf);
+
+        // OS/2 has an undocumented info level, 7, that appears to return a case-corrected version
+        //  of the path. (FIL_QUERYFULLNAME doesn't correct the case of what the app queries on
+        //  OS/2). Since we have to case-correct for a Unix filesystem anyhow, we just use the
+        //  usual FIL_QUERYFULLNAME to handle the undocumented level. Java uses this level.
+        case 7:
         case FIL_QUERYFULLNAME: return queryPathInfoFullName(unixPath, pInfoBuf, cbInfoBuf);
         default: break;
     } // switch
@@ -2706,6 +2736,124 @@ APIRET DosFreeThreadLocalMemory(ULONG *p)
 
     return retval;
 } // DosFreeThreadLocalMemory
+
+APIRET DosQueryFHState(HFILE hFile, PULONG pMode)
+{
+    TRACE_NATIVE("DosQueryFHState(%u, %p)", (uint) hFile, pMode);
+
+    APIRET retval = NO_ERROR;
+    ULONG tmp = 0;
+    if (!pMode)
+        pMode = &tmp;
+
+    grabLock(&GMutexDosCalls);
+    if ((hFile < MaxHFiles) && (HFiles[hFile].fd != -1))
+        *pMode = HFiles[hFile].flags;
+    else
+        retval = ERROR_INVALID_HANDLE;
+    ungrabLock(&GMutexDosCalls);
+
+    return retval;
+} // DosQueryFHState
+
+APIRET DosQueryHeaderInfo(HMODULE hmod, ULONG ulIndex, PVOID pvBuffer, ULONG cbBuffer, ULONG ulSubFunction)
+{
+    TRACE_NATIVE("DosQueryHeaderInfo(%u, %u, %p, %u, %u)", (uint) hmod, (uint) ulIndex, pvBuffer, (uint) cbBuffer, (uint) ulSubFunction);
+
+    switch (ulSubFunction) {
+        //case QHINF_EXEINFO:
+        //case QHINF_READRSRCTBL:
+        //case QHINF_READFILE:
+
+        case QHINF_LIBPATHLENGTH:
+            if (cbBuffer < sizeof (ULONG))
+                return ERROR_BUFFER_OVERFLOW;
+            *((ULONG *) pvBuffer) = GLoaderState->libpathlen;
+            return NO_ERROR;
+
+        case QHINF_LIBPATH:
+            if (cbBuffer < GLoaderState->libpathlen)
+                return ERROR_BUFFER_OVERFLOW;
+            strcpy((char *) pvBuffer, GLoaderState->libpath);
+            return NO_ERROR;
+
+        //case QHINF_FIXENTRY:
+        //case QHINF_STE:
+        //case QHINF_MAPSEL:
+
+        default: FIXME("I don't know what this query wants"); break;
+    } // switch
+
+    return ERROR_INVALID_PARAMETER;
+} // DosQueryHeaderInfo
+
+APIRET OS2API DosQueryExtLIBPATH(PSZ pszExtLIBPATH, ULONG flags)
+{
+    TRACE_NATIVE("DosQueryExtLIBPATH('%s', %u)", pszExtLIBPATH, (uint) flags);
+
+    // !!! FIXME: this is mostly a stub for now.
+
+    if ((flags != BEGIN_LIBPATH) && (flags != END_LIBPATH))
+        return ERROR_INVALID_PARAMETER;
+
+    if (pszExtLIBPATH)
+        *pszExtLIBPATH = '\0';
+
+    return NO_ERROR;
+} // DosQueryExtLIBPATH
+
+APIRET DosSetMaxFH(ULONG cFH)
+{
+    grabLock(&GMutexDosCalls);
+
+    if (cFH < MaxHFiles) {
+        ungrabLock(&GMutexDosCalls);
+        return ERROR_INVALID_PARAMETER;  // strictly speaking, we could shrink, but I'm not doing it.
+    } // if
+
+    if (cFH == MaxHFiles) {
+        ungrabLock(&GMutexDosCalls);
+        return NO_ERROR;
+    } // if
+
+    HFileInfo *info = (HFileInfo *) realloc(HFiles, sizeof (HFileInfo) * (cFH));
+    if (info != NULL) {
+        HFiles = info;
+        info += MaxHFiles;
+        for (ULONG i = MaxHFiles; i < cFH; i++, info++) {
+            info->fd = -1;
+            info->type = 0;
+            info->attr = 0;
+            info->flags = 0;
+        } // for
+        MaxHFiles = cFH;
+    } // if
+
+    ungrabLock(&GMutexDosCalls);
+
+    return NO_ERROR;
+} // DosSetMaxFH
+
+APIRET DosQuerySysState(ULONG func, ULONG arg1, ULONG pid, ULONG _res_, PVOID buf, ULONG bufsz)
+{
+    TRACE_NATIVE("DosQuerySysState(%u, %u, %u, %u, %p, %u)", (uint) func, (uint) arg1, (uint) pid, (uint) _res_, buf, (uint) bufsz);
+    FIXME("implement me");
+    return ERROR_INVALID_PARAMETER;
+} // DosQuerySysState
+
+APIRET DosR3ExitAddr(void)
+{
+    TRACE_NATIVE("DosR3ExitAddr()");
+    FIXME("I have no idea what this is");  // but...JAVA USES IT.
+    return ERROR_INVALID_PARAMETER;
+} // DosR3ExitAddr
+
+APIRET DosQueryThreadContext(TID tid, ULONG level, PCONTEXTRECORD pcxt)
+{
+    TRACE_NATIVE("DosQueryThreadContext(%u, %u, %p)", (uint) tid, (uint) level, pcxt);
+    FIXME("Need to be able to suspend threads first");
+    return ERROR_INVALID_PARAMETER;
+} // DosQueryThreadContext
 
 // end of doscalls.c ...
 
