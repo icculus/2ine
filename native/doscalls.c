@@ -1,12 +1,11 @@
-#define _POSIX_C_SOURCE 199309
-#define _BSD_SOURCE
-#define _GNU_SOURCE
+#include "os2native.h"
+#include "doscalls.h"
+
 #include <unistd.h>
 #include <limits.h>
 #include <time.h>
 #include <dirent.h>
 #include <fcntl.h>
-#include <pthread.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
@@ -14,10 +13,6 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
-#include <sys/mman.h>
-
-#include "os2native.h"
-#include "doscalls.h"
 
 static LxLoaderState *GLoaderState = NULL;
 
@@ -98,6 +93,11 @@ typedef struct
 } DirFinder;
 
 static DirFinder GHDir1;
+
+
+// !!! FIXME:
+#undef TRACE_NATIVE
+#define TRACE_NATIVE(...) do { if (GLoaderState->trace_native) { fprintf(stderr, "2INE TRACE [%lu]: ", (unsigned long) pthread_self()); fprintf(stderr, __VA_ARGS__); fprintf(stderr, ";\n"); } } while (0)
 
 
 LX_NATIVE_MODULE_DEINIT({
@@ -599,11 +599,32 @@ APIRET DosSetExceptionHandler(PEXCEPTIONREGISTRATIONRECORD rec)
     return NO_ERROR;
 } // DosSetExceptionHandler
 
-ULONG DosFlatToSel(PVOID ptr)
+ULONG _DosFlatToSel(PVOID ptr)
 {
     TRACE_NATIVE("DosFlatToSel(%p)", ptr);
-    return ((ULONG) ((size_t)ptr)) >> 16;  // !!! FIXME
-} // DosFlatToSel
+
+    uint16 selector = 0;
+    uint16 offset = 0;
+    if (!GLoaderState->findSelector((uint32) ptr, &selector, &offset)) {
+        fprintf(stderr, "Uhoh, ran out of LDT entries?!\n");
+        return 0;  // oh well, crash.
+    } // if
+
+    selector = (selector << 3) | 7;
+    return (((uint32)selector) << 16) | ((uint32) offset);
+} // _DosFlatToSel
+
+// DosFlatToSel() passes its argument in %eax, so a little asm to bridge that...
+__asm__ (
+    ".globl DosFlatToSel  \n\t"
+    ".type	DosFlatToSel, @function \n\t"
+    "DosFlatToSel:  \n\t"
+    "    pushl %eax  \n\t"
+    "    call _DosFlatToSel  \n\t"
+    "    addl $4, %esp  \n\t"
+    "    ret  \n\t"
+	".size	_DosFlatToSel, .-_DosFlatToSel  \n\t"
+);
 
 APIRET DosSetSignalExceptionFocus(BOOL32 flag, PULONG pulTimes)
 {

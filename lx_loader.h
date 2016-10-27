@@ -129,8 +129,10 @@ typedef struct LxResourceTableEntry
 
 typedef struct LxMmaps
 {
+    void *mapped;
     void *addr;
     size_t size;
+    uint16 alias;  // 16:16 alias, if one.
 } LxMmaps;
 
 typedef struct LxExport
@@ -138,6 +140,7 @@ typedef struct LxExport
     uint32 ordinal;
     const char *name;  // can be NULL
     void *addr;
+    const LxMmaps *object;
 } LxExport;
 
 struct LxModule;
@@ -149,6 +152,7 @@ struct LxModule
     char name[256];  // !!! FIXME: allocate this.
     LxModule **dependencies;
     LxMmaps *mmaps;
+
     const LxExport *exports;
     uint32 num_exports;
     void *nativelib;
@@ -202,14 +206,23 @@ typedef struct LxLoaderState
 {
     LxModule *loaded_modules;
     LxModule *main_module;
+    uint8 main_tibspace[LXTIBSIZE];
     LxPIB pib;
     int subprocess;
     int running;
+    int trace_native;
+    uint16 original_cs;
+    uint16 original_ss;
+    uint16 original_ds;
+    uint32 ldt[8192];
     uint32 *tlspage;
     uint32 tlsmask;  // one bit for each TLS slot in use.
     uint8 tlsallocs[32];  // number of TLS slots allocated in one block, indexed by starting block (zero if not the starting block).
     uint16 (*initOs2Tib)(uint8 *tibspace, void *_topOfStack, const size_t stacklen, const uint32 tid);
     void (*deinitOs2Tib)(const uint16 selector);
+    int (*findSelector)(const uint32 addr, uint16 *outselector, uint16 *outoffset);
+    void (*freeSelector)(const uint16 selector);
+    void *(*convert1616to32)(const uint32 addr1616);
     LxModule *(*loadModule)(const char *modname);
     int (*locatePathCaseInsensitive)(char *buf);
     char *(*makeUnixPath)(const char *os2path, uint32 *err);

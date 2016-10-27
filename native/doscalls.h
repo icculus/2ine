@@ -386,7 +386,7 @@ APIRET OS2API DosExitList(ULONG ordercode, PFNEXITLIST pfn);
 APIRET OS2API DosCreateEventSem(PSZ pszName, PHEV phev, ULONG flAttr, BOOL32 fState);
 APIRET OS2API DosCreateMutexSem(PSZ pszName, PHMTX phmtx, ULONG flAttr, BOOL32 fState);
 APIRET OS2API DosSetExceptionHandler(PEXCEPTIONREGISTRATIONRECORD pERegRec);
-ULONG OS2API DosFlatToSel(PVOID ptr);
+ULONG OS2API DosFlatToSel(VOID);
 APIRET OS2API DosSetSignalExceptionFocus(BOOL32 flag, PULONG pulTimes);
 APIRET OS2API DosSetRelMaxFH(PLONG pcbReqCount, PULONG pcbCurMaxFH);
 APIRET OS2API DosAllocMem(PPVOID ppb, ULONG cb, ULONG flag);

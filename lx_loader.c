@@ -23,7 +23,6 @@
 
 static LxLoaderState _GLoaderState;
 static LxLoaderState *GLoaderState = &_GLoaderState;
-static uint8 GMainTibSpace[LXTIBSIZE];
 
 // !!! FIXME: move this into an lx_common.c file.
 static int sanityCheckLxModule(uint8 **_exe, uint32 *_exelen)
@@ -410,6 +409,149 @@ static void *generateMissingTrampoline(const char *_module, const char *_entry)
 } // generateMissingTrampoline
 
 
+// !!! FIXME: mutex this
+static int allocateSelector(const uint16 selector, const uint32 addr, const unsigned int contents, const int is32bit)
+{
+    assert(selector < (sizeof (GLoaderState->ldt) / sizeof (GLoaderState->ldt[0])));
+
+    if (GLoaderState->ldt[selector])
+        return 0;  // already in use.
+
+    //const int expand_down = (contents == MODIFY_LDT_CONTENTS_STACK);
+
+    struct user_desc entry;
+    entry.entry_number = (unsigned int) selector;
+    entry.base_addr = (unsigned int) addr; //(expand_down ? (addr + 0x10000) : addr);
+    entry.limit = 16; //expand_down ? 0 : 16;
+    entry.seg_32bit = is32bit;
+    entry.contents = contents;
+    entry.read_exec_only = 0;
+    entry.limit_in_pages = 1;
+    entry.seg_not_present = 0;
+    entry.useable = 1;
+    if (syscall(SYS_modify_ldt, 1, &entry, sizeof (entry)) != 0)
+        return 0;
+
+    GLoaderState->ldt[selector] = addr;
+    return 1;
+} // allocateSelector
+
+// !!! FIXME: mutex this
+static int findSelector(const uint32 _addr, uint16 *outselector, uint16 *outoffset)
+{
+    uint32 addr = _addr;
+    if (addr < 4096)
+        return 0;   // we won't map the NULL page.
+
+    const uint32 *ldt = GLoaderState->ldt;
+
+    int available = -1;
+    int preferred = -1;
+
+    // optimize for the case where we need a selector that happenes to be in tiled memory,
+    //  since it's fast to look up.
+    if (addr < (1024 * 1024 * 512)) {
+        const uint16 idx = (uint16) (addr >> 16);
+        const uint32 tile = ldt[idx];
+        if (tile == 0) {
+            preferred = available = idx;  // we can use this piece.
+        } else if ((tile <= addr) && ((tile + 0x10000) > addr)) {
+            *outselector = idx;
+            *outoffset = (uint16) (addr - tile);
+            //printf("SELECTOR: found tiled selector 0x%X for address %p\n", (uint) idx, (void *) addr);
+            return 1;  // already allocated to this address.
+        } // if
+    } // if
+
+    for (int i = 0; i < (sizeof (GLoaderState->ldt) / sizeof (GLoaderState->ldt[0])); i++) {
+        const uint32 tile = ldt[i];
+        if (tile == 0)
+            available = i;
+        else if ((tile <= addr) && ((tile + 0x10000) > addr)) {
+            *outselector = (uint16) i;
+            *outoffset = (uint16) (addr - tile);
+            //printf("SELECTOR: found existing selector 0x%X for address %p\n", (uint) i, (void *) addr);
+            return 1;  // already allocated to this address.
+        } // else if
+    } // for
+
+    // nothing allocated to this address so far. Try to allocate something.
+    if (available == -1) {
+        fprintf(stderr, "Uhoh, we've run out of LDT selectors! Probably about to crash...\n"); fflush(stderr);
+        return 0;  // uh oh, out of selectors!
+    } // if
+
+    const uint32 diff = addr % 0x10000;
+    addr -= diff;   // make sure we start on a 64k border.
+
+    const uint16 selector = (uint16) (preferred != -1) ? preferred : available;
+    if (!allocateSelector(selector, addr, MODIFY_LDT_CONTENTS_CODE, 0)) {
+        fprintf(stderr, "Uhoh, we've failed to allocate LDT selector %u! Probably about to crash...\n", (uint) selector); fflush(stderr);
+        return 0;
+    } // if
+
+    //printf("SELECTOR: allocated selector 0x%X for address %p\n", (uint) selector, (void *) addr);
+    *outselector = selector;
+    *outoffset = (uint16) diff;
+    return 1;
+} // findSelector
+
+// !!! FIXME: mutex this
+static void freeSelector(const uint16 selector)
+{
+    assert(selector < (sizeof (GLoaderState->ldt) / sizeof (GLoaderState->ldt[0])));
+
+    if (!GLoaderState->ldt[selector])
+        return;  // already free.
+
+    struct user_desc entry;
+    memset(&entry, '\0', sizeof (entry));
+    entry.entry_number = (unsigned int) selector;
+    entry.read_exec_only = 1;
+    entry.seg_not_present = 1;
+    if (syscall(SYS_modify_ldt, 1, &entry, sizeof (entry)) != 0)
+        return;  // oh well.
+
+    GLoaderState->ldt[selector] = 0;
+} // freeSelector
+
+static void *convert1616to32(const uint32 addr1616)
+{
+    const uint16 selector = (uint16) (addr1616 >> 19);  // slide segment down, and shift out control bits.
+    const uint16 offset = (uint16) (addr1616 % 0x10000);  // all our LDT segments start at 64k boundaries (at the moment!).
+    assert(GLoaderState->ldt[selector] != 0);
+    return (void *) (size_t) (GLoaderState->ldt[selector] + offset);
+} // convert1616to32
+
+// EMX (and probably many other things) occasionally has to call a 16-bit
+//  system API, and assumes its stack is tiled in the LDT; it'll just shift
+//  the stack pointer and use it as a stack segment for the 16-bit call
+//  without calling DosFlatToSeg(). So we tile the main thread's stack and
+//  pray that covers it. If we have to tile _every_ thread's stack, we can do
+//  that later.
+// !!! FIXME: if we do this for secondary thread stacks, we'll need to mutex this.
+static void initOs2StackSegments(uint32 addr, uint32 stacklen)
+{
+    //printf("base == %p, stacklen == %u\n", (void*)addr, (uint) stacklen);
+    const uint32 diff = addr % 0x10000;
+    addr -= diff;   // make sure we start on a 64k border.
+    stacklen += diff;   // make sure we start on a 64k border.
+
+    // We fill in LDT tiles for the entire stack (EMX, etc, assume this will work).
+    if (stacklen % 0x10000)  // pad this out to 64k
+        stacklen += 0x10000 - (stacklen % 0x10000);
+
+    // !!! FIXME: do we have to allocate these backwards? (stack grows down).
+    while (stacklen) {
+        //printf("Allocating selector 0x%X for stack %p ... \n", (uint) (addr >> 16), (void *) addr);
+        if (!allocateSelector((uint16) (addr >> 16), addr, MODIFY_LDT_CONTENTS_DATA/*STACK*/, 0)) {
+            FIXME("uhoh, couldn't set up an LDT entry for a stack segment! Might crash later!");
+        } // if
+        stacklen -= 0x10000;
+        addr += 0x10000;
+    } // while
+} // initOs2StackSegments
+
 // OS/2 threads keep their Thread Information Block at FS:0x0000, so we have
 //  to ask the Linux kernel to screw around with 16-bit selectors on our
 //  behalf so we don't crash out when apps try to access it directly.
@@ -474,7 +616,6 @@ static void deinitOs2Tib(const uint16 selector)
     assert(rc == 0);  FIXME("this can legit fail, though!");
 } // deinitOs2Tib
 
-
 static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int argc, char **argv, char **envp)
 {
     uint8 *stack = (uint8 *) ((size_t) lxmod->esp);
@@ -503,7 +644,7 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
         "ret               \n\t"  // go to OS/2 land!
         "1:                \n\t"  //  ...and return here.
         "andl $-16, %%esp  \n\t"  // align the stack for macOS.
-        "subl $-4, %%esp  \n\t"   // align the stack for macOS.
+        "subl $-4, %%esp   \n\t"   // align the stack for macOS.
         "pushl %%eax       \n\t"  // call _exit() with whatever is in %eax.
         "call _exit        \n\t"
             : // no outputs
@@ -628,8 +769,10 @@ static void freeLxModule(LxModule *lxmod)
     free(lxmod->dependencies);
 
     for (uint32 i = 0; i < lxmod->lx.module_num_objects; i++) {
+        if (lxmod->mmaps[i].alias != 0xFFFF)
+            freeSelector(lxmod->mmaps[i].alias);
         if (lxmod->mmaps[i].addr)
-            munmap(lxmod->mmaps[i].addr, lxmod->mmaps[i].size);
+            munmap(lxmod->mmaps[i].mapped, lxmod->mmaps[i].size);
     } // for
     free(lxmod->mmaps);    
 
@@ -646,15 +789,24 @@ static void freeLxModule(LxModule *lxmod)
 
 static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int dependency_tree_depth);
 
-static void *getModuleProcAddrByOrdinal(const LxModule *module, const uint32 ordinal)
+static void *getModuleProcAddrByOrdinal(const LxModule *module, const uint32 ordinal, const LxExport **_lxexp)
 {
     //printf("lookup module == '%s', ordinal == %u\n", module->name, (uint) ordinal);
 
     const LxExport *lxexp = module->exports;
     for (uint32 i = 0; i < module->num_exports; i++, lxexp++) {
-        if (lxexp->ordinal == ordinal)
-            return lxexp->addr;
+        if (lxexp->ordinal == ordinal) {
+            if (_lxexp)
+                *_lxexp = lxexp;
+            void *retval = lxexp->addr;
+            if (lxexp->object && lxexp->object->alias != 0xFFFF)  // 16-bit bridge? this is actually a void**, due to some macro salsa.  :/
+                retval = *((void**) retval);
+            return retval;
+        } // if
     } // for
+
+    if (_lxexp)
+        *_lxexp = NULL;
 
     #if 1
     char entry[128];
@@ -665,15 +817,24 @@ static void *getModuleProcAddrByOrdinal(const LxModule *module, const uint32 ord
     #endif
 } // getModuleProcAddrByOrdinal
 
-static void *getModuleProcAddrByName(const LxModule *module, const char *name)
+static void *getModuleProcAddrByName(const LxModule *module, const char *name, const LxExport **_lxexp)
 {
     //printf("lookup module == '%s', name == '%s'\n", module->name, name);
 
     const LxExport *lxexp = module->exports;
     for (uint32 i = 0; i < module->num_exports; i++, lxexp++) {
-        if (strcmp(lxexp->name, name) == 0)
-            return lxexp->addr;
+        if (strcmp(lxexp->name, name) == 0) {
+            if (_lxexp)
+                *_lxexp = lxexp;
+            void *retval = lxexp->addr;
+            if (lxexp->object && lxexp->object->alias != 0xFFFF)  // 16-bit bridge? this is actually a void**, due to some macro salsa.  :/
+                retval = *((void**) retval);
+            return retval;
+        } // if
     } // for
+
+    if (_lxexp)
+        *_lxexp = NULL;
 
     #if 1
     return generateMissingTrampoline(module->name, name);
@@ -698,10 +859,10 @@ static void doFixup(uint8 *page, const sint16 offset, const uint32 finalval, con
         case 2: { uint16 *dst = (uint16 *) (page + offset); *dst = (uint16) finalval; } break;
         case 4: { uint32 *dst = (uint32 *) (page + offset); *dst = (uint32) finalval; } break;
         case 6: {
-            uint16 *dst1 = (uint16 *) (page + offset);
-            *dst1 = (uint16) finalval2;
-            uint32 *dst2 = (uint32 *) (page + offset + 2);
-            *dst2 = (uint32) finalval;
+            uint32 *dst1 = (uint32 *) (page + offset);
+            *dst1 = (uint32) finalval;
+            uint16 *dst2 = (uint16 *) (page + offset + 4);
+            *dst2 = (uint16) finalval2;
             break;
         } // case
         default:
@@ -719,7 +880,7 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
     const uint32 fixuplen = fixuppage[1] - fixuppage[0];
     const uint8 *fixup = (exe + lx->fixup_record_table_offset) + fixupoffset;
     const uint8 *fixupend = fixup + fixuplen;
-//    int record = 0;
+//int record = 0;
     while (fixup < fixupend) {
 //record++; printf("FIXUP obj #%u page #%u record #: %d\n", (uint) (obj - origobj), (uint) pagenum, record);
         const uint8 srctype = *(fixup++);
@@ -730,24 +891,39 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
         uint32 finalval = 0;
         uint16 finalval2 = 0;
         uint32 finalsize = 0;
+        int allow_fixup_to_alias = 0;
 
         switch (srctype & 0xF) {
             case 0x0:  // byte fixup
                 finalsize = 1;
                 break;
             case 0x2:  // 16-bit selector fixup
+                finalsize = 2;
+                allow_fixup_to_alias = 1;
+                break;
             case 0x5:  // 16-bit offset fixup
                 finalsize = 2;
                 break;
             case 0x3:  // 16:16 pointer fixup
+                finalsize = 4;
+                allow_fixup_to_alias = 1;
+                break;
             case 0x7:  // 32-bit offset fixup
             case 0x8:  // 32-bit self-relative offset fixup
                 finalsize = 4;
                 break;
             case 0x6:  // 16:32 pointer fixup
+                finalval2 = GLoaderState->original_cs;
                 finalsize = 6;
+                allow_fixup_to_alias = 1;
                 break;
         } // switch
+
+        const int fixup_to_alias = ((srctype & 0x10) != 0);
+        if (fixup_to_alias) {  // fixup to alias flag.
+            if (!allow_fixup_to_alias)
+                fprintf(stderr, "WARNING: Bogus fixup srctype (%u) with fixup-to-alias flag!\n", (uint) (srctype & 0xF));
+        } // if
 
         if (srctype & 0x20) { // contains a source list
             srclist_count = *(fixup++);
@@ -766,8 +942,8 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
                 } // else
 
                 uint32 targetoffset = 0;
-                // !!! FIXME: where do we use 16-bit selectors? What does this mean in a 32-bit app?
-                if ((srctype & 0xF) != 0x2) { // not a 16-bit selector fixup?
+
+                if ((srctype & 0xF) != 2) {  // not used for 16-bit selector fixups.
                     if (fixupflags & 0x10) {  // 32-bit target offset
                         targetoffset = *((uint32 *) fixup); fixup += 4;
                     } else {  // 16-bit target offset
@@ -775,8 +951,22 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
                     } // else
                 } // if
 
-                const uint32 base = (uint32) (size_t) lxmod->mmaps[objectid - 1].addr;
-                finalval = base + targetoffset;
+                if (!fixup_to_alias) {
+                    const uint32 base = (uint32) (size_t) lxmod->mmaps[objectid - 1].addr;
+                    finalval = base + targetoffset;
+                } else {
+                    if (lxmod->mmaps[objectid - 1].alias == 0xFFFF) {
+                        fprintf(stderr, "uhoh, need a 16-bit alias fixup, but object has no 16:16 alias!\n");
+                    } else {
+                        const uint16 selector = (lxmod->mmaps[objectid - 1].alias << 3) | 7;
+                        switch (srctype & 0xF) {
+                            case 0x2: finalval = selector; break; // 16-bit selector fixup?
+                            case 0x3: finalval = (((uint32) selector) << 16) | targetoffset; break; // 16:16 pointer fixup
+                            case 0x6: finalval = targetoffset; finalval2 = selector; break; // 16:32 pointer fixup
+                            default: assert(!"shouldn't hit this code"); break;
+                        } // switch
+                    } // else
+                } // else
                 break;
             } // case
 
@@ -797,12 +987,28 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
                     importid = (uint32) *((uint16 *) fixup); fixup += 2;
                 } // else
 
+                const LxExport *lxexp = NULL;
                 if (moduleid == 0) {
                     fprintf(stderr, "uhoh, looking for module ordinal 0, which is illegal.\n");
                 } else if (moduleid > lx->num_import_mod_entries) {
                     fprintf(stderr, "uhoh, looking for module ordinal %u, but only %u available.\n", (uint) moduleid, (uint) lx->num_import_mod_entries);
                 } else {
-                    finalval = (uint32) (size_t) getModuleProcAddrByOrdinal(lxmod->dependencies[moduleid-1], importid);
+                    //printf("import-by-ordinal fixup: module=%u import=%u\n", (uint) moduleid, (uint) importid);
+                    finalval = (uint32) (size_t) getModuleProcAddrByOrdinal(lxmod->dependencies[moduleid-1], importid, &lxexp);
+                } // else
+
+                if (fixup_to_alias) {
+                    if (!lxexp || !lxexp->object || (lxexp->object->alias == 0xFFFF)) {
+                        fprintf(stderr, "uhoh, couldn't find a selector for a fixup-to-alias address!\n");
+                    } else {
+                        const uint16 selector = (lxexp->object->alias << 3) | 7;
+                        switch (srctype & 0xF) {
+                            case 0x2: finalval = selector; break; // 16-bit selector fixup?  !!! FIXME:
+                            case 0x3: finalval = (((uint32) selector) << 16) | (finalval - ((uint32)lxexp->object->addr)); break; // 16:16 pointer fixup
+                            case 0x6: finalval -= ((uint32)lxexp->object->addr); finalval2 = selector; break; // 16:32 pointer fixup
+                            default: assert(!"shouldn't hit this code"); break;
+                        } // switch
+                    } // else
                 } // else
                 break;
             } // case
@@ -822,6 +1028,7 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
                     name_offset = *((uint16 *) fixup); fixup += 2;
                 } // else
 
+                const LxExport *lxexp = NULL;
                 if (moduleid == 0) {
                     fprintf(stderr, "uhoh, looking for module ordinal 0, which is illegal.\n");
                 } else if (moduleid > lx->num_import_mod_entries) {
@@ -832,14 +1039,30 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
                     const uint8 namelen = *(import_name++) & 0x7F;  // the top bit is reserved.
                     memcpy(name, import_name, namelen);
                     name[namelen] = '\0';
-                    finalval = (uint32) (size_t) getModuleProcAddrByName(lxmod->dependencies[moduleid-1], name);
+                    //printf("import-by-name fixup: module=%u import='%s'\n", (uint) moduleid, name);
+                    finalval = (uint32) (size_t) getModuleProcAddrByName(lxmod->dependencies[moduleid-1], name, &lxexp);
+                } // else
+
+                if (fixup_to_alias) {
+                    if (!lxexp || !lxexp->object || (lxexp->object->alias == 0xFFFF)) {
+                        fprintf(stderr, "uhoh, couldn't find a selector for a fixup-to-alias address!\n");
+                    } else {
+                        const uint16 selector = (lxexp->object->alias << 3) | 7;
+                        switch (srctype & 0xF) {
+                            case 0x2: finalval = selector; break; // 16-bit selector fixup?  !!! FIXME:
+                            case 0x3: finalval = (((uint32) selector) << 16) | (finalval - ((uint32)lxexp->object->addr)); break; // 16:16 pointer fixup
+                            case 0x6: finalval -= ((uint32)lxexp->object->addr); finalval2 = selector; break; // 16:32 pointer fixup
+                            default: assert(!"shouldn't hit this code"); break;
+                        } // switch
+                    } // else
                 } // else
                 break;
             } // case
 
             case 0x3: { // Internal entry table fixup record
-                fprintf(stderr, "FIXUP 0x3 WRITE ME\n");
-                exit(1);
+                FIXME("FIXUP 0x3 WRITE ME");
+                assert(!"write me");
+                _exit(1);
                 break;
             } // case
         } // switch
@@ -863,7 +1086,7 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
                     doFixup(page, offset, finalval - (((uint32)page)+offset+4), 0, finalsize);
                 } else {
                     doFixup(page, offset, finalval, finalval2, finalsize);
-                }
+                } // else
             } // for
         } else {
             if ((srctype & 0xF) == 0x08) {  // self-relative fixup?
@@ -871,7 +1094,7 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
                 doFixup(page, srcoffset, finalval - (((uint32)page)+srcoffset+4), 0, finalsize);
             } else {
                 doFixup(page, srcoffset, finalval, finalval2, finalsize);
-            }
+            } // else
         } // else
     } // while
 } // fixupPage
@@ -950,6 +1173,9 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
     } // if
     memset(retval->dependencies, '\0', sizeof (LxModule *) * lx->num_import_mod_entries);
     memset(retval->mmaps, '\0', sizeof (LxMmaps) * lx->module_num_objects);
+    for (int i = 0; i < lx->module_num_objects; i++)
+        retval->mmaps[i].alias = 0xFFFF;
+
     memcpy(&retval->lx, lx, sizeof (*lx));
 
     if (lx->resident_name_table_offset) {
@@ -980,6 +1206,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
             goto loadlx_failed;
     } // if
 
+    int uses_aliases = 0;
     const LxObjectTableEntry *obj = ((const LxObjectTableEntry *) (exe + lx->object_table_offset));
     for (uint32 i = 0; i < lx->module_num_objects; i++, obj++) {
         if (obj->object_flags & 0x8)  // !!! FIXME: resource object; ignore this until resource support is written, later.
@@ -989,12 +1216,24 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
         if ((vsize % lx->page_size) != 0)
              vsize += lx->page_size - (vsize % lx->page_size);
 
-        const int mmapflags = MAP_POPULATE | MAP_ANON | MAP_PRIVATE | (isDLL ? 0 : MAP_FIXED);
+        const int needs_1616_alias = ((obj->object_flags & 0x1000) != 0);  // Object needs a 16:16 alias.
+        if (needs_1616_alias) {
+            if (vsize > 0x10000) {
+                fprintf(stderr, "Module '%s' object #%u needs a 16:16 alias, but is > 64k\n", modname, (uint) (i+1));
+                goto loadlx_failed;  // I guess this is an error...?
+            } // if
+            uses_aliases = 1;
+
+            if (isDLL)  // (specifically: if !MAP_FIXED)
+                vsize += 0x10000;  // make sure we can align to a 64k boundary.
+        } // if
+
+        const int mmapflags = MAP_ANON | MAP_PRIVATE | (isDLL ? 0 : MAP_FIXED);
         void *base = isDLL ? NULL : (void *) ((size_t) obj->reloc_base_addr);
         void *mmapaddr = mmap(base, vsize, PROT_READ|PROT_WRITE, mmapflags, -1, 0);
         // we'll mprotect() these pages to the proper permissions later.
 
-        //fprintf(stderr, "mmap(%p, %u, RW-, ANON|PRIVATE%s, -1, 0) == %p\n", base, (uint) vsize, isDLL ? "" : "|FIXED", mmapaddr);
+        //fprintf(stderr, "%s lxobj #%u mmap(%p, %u, %c%c%c, ANON|PRIVATE%s, -1, 0) == %p\n", retval->name, (uint) i, base, (uint) vsize, (obj->object_flags & 0x1) ? 'R' : '-', (obj->object_flags & 0x2) ? 'W' : '-', (obj->object_flags & 0x4) ? 'X' : '-', isDLL ? "" : "|FIXED", mmapaddr);
 
         if (mmapaddr == ((void *) MAP_FAILED)) {
             fprintf(stderr, "mmap(%p, %u, RW-, ANON|PRIVATE%s, -1, 0) failed (%d): %s\n",
@@ -1002,8 +1241,20 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
             goto loadlx_failed;
         } // if
 
-        retval->mmaps[i].addr = mmapaddr;
+        retval->mmaps[i].mapped = mmapaddr;
         retval->mmaps[i].size = vsize;
+
+        // force objects with a 16:16 alias to a 64k boundary.
+        size_t adjust = (size_t) mmapaddr;
+        if (needs_1616_alias && ((adjust % 0x10000) != 0)) {
+            assert(isDLL);  // this must be fixed to a specific address, hopefully handled this...?
+            const size_t diff = 0x10000 - (adjust % 0x10000);
+            vsize -= diff;
+            adjust += diff;
+            mmapaddr = (void *) adjust;
+        } // if
+
+        retval->mmaps[i].addr = mmapaddr;
 
         const LxObjectPageTableEntry *objpage = ((const LxObjectPageTableEntry *) (exe + lx->object_page_table_offset));
         objpage += obj->page_table_index - 1;
@@ -1055,9 +1306,8 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
 
         // any bytes at the end of this object that we didn't initialize? Zero them out.
         const uint32 remain = vsize - ((uint32) (dst - ((uint8 *) mmapaddr)));
-        if (remain) {
+        if (remain)
             memset(dst, '\0', remain);
-        } // if
     } // for
 
     // All the pages we need from the EXE are loaded into the appropriate spots in memory.
@@ -1072,17 +1322,30 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
     // !!! FIXME: esp==0 means something special for programs (and is ignored for library init).
     // !!! FIXME: "A zero value in this field indicates that the stack pointer is to be initialized to the highest address/offset in the object"
     if (!isDLL) {
-        retval->esp = lx->esp;
-        if (lx->esp_object != 0) {
-            const uint32 base = (uint32) ((size_t)retval->mmaps[lx->esp_object - 1].addr);
-            retval->esp += base;
-        } // if
-    } // if
+        assert(lx->esp_object != 0);
+        const uint32 stackbase = (uint32) ((size_t)retval->mmaps[lx->esp_object - 1].addr);
+        retval->esp = lx->esp + stackbase;
 
-    if (!isDLL) {
         // This needs to be set up now, so it's available to any library
         //  init code that runs in LX land.
-        initOs2Tib(GMainTibSpace, (void *) ((size_t) retval->esp), retval->mmaps[retval->lx.esp_object - 1].size, 0);
+        initOs2Tib(GLoaderState->main_tibspace, (void *) ((size_t) retval->esp), retval->mmaps[retval->lx.esp_object - 1].size, 0);
+        initOs2StackSegments(stackbase, retval->mmaps[retval->lx.esp_object - 1].size);
+    } // if
+
+    // now we have the stack tiled--and it got the specific selectors it
+    //  needed--let's start making 16:16 aliases for the appropriate objects.
+    if (uses_aliases) {
+        obj = ((const LxObjectTableEntry *) (exe + lx->object_table_offset));
+        for (uint32 i = 0; i < lx->module_num_objects; i++, obj++) {
+            if ((obj->object_flags & 0x1000) == 0)
+                continue;  // Object doesn't need a 16:16 alias, skip it.
+            uint16 offset = 0;
+            if (!findSelector((uint32) (size_t) retval->mmaps[i].addr, &retval->mmaps[i].alias, &offset)) {
+                fprintf(stderr, "Ran out of LDT entries getting a 16:16 alias for '%s' object #%u!\n", modname, (uint) (i + 1));
+                goto loadlx_failed;
+            } // if
+            assert(offset == 0);
+        } // for
     } // if
 
     // Set up our exports...
@@ -1124,6 +1387,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
                     entryptr++;
                     lxexp->ordinal = ordinal++;
                     lxexp->addr = ((uint8 *) retval->mmaps[objidx].addr) + *((const uint16 *) entryptr);
+                    lxexp->object = &retval->mmaps[objidx];
                     lxexp++;
                     entryptr += 2;
                 } // for
@@ -1136,6 +1400,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
                     entryptr++;
                     lxexp->ordinal = ordinal++;
                     lxexp->addr = ((uint8 *) retval->mmaps[objidx].addr) + *((const uint32 *) entryptr);
+                    lxexp->object = &retval->mmaps[objidx];
                     lxexp++;
                     entryptr += 4;
                 }
@@ -1210,7 +1475,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
                          ((obj->object_flags & 0x2) ? PROT_WRITE : 0) |
                          ((obj->object_flags & 0x4) ? PROT_EXEC : 0);
 
-        if (mprotect(retval->mmaps[i].addr, retval->mmaps[i].size, prot) == -1) {
+        if (mprotect(retval->mmaps[i].mapped, retval->mmaps[i].size, prot) == -1) {
             fprintf(stderr, "mprotect(%p, %u, %s%s%s, ANON|PRIVATE|FIXED, -1, 0) failed (%d): %s\n",
                     retval->mmaps[i].addr, (uint) retval->mmaps[i].size,
                     (prot&PROT_READ) ? "R" : "-",
@@ -1607,10 +1872,24 @@ int main(int argc, char **argv, char **envp)
     if (!installSignalHandlers())
         return 1;
 
+    if (getenv("TRACE_NATIVE"))
+        GLoaderState->trace_native = 1;
+
+    unsigned int segment = 0;
+    __asm__ __volatile__ ( "movw %%cs, %%ax  \n\t" : "=a" (segment) );
+    GLoaderState->original_cs = segment;
+    __asm__ __volatile__ ( "movw %%ss, %%ax  \n\t" : "=a" (segment) );
+    GLoaderState->original_ss = segment;
+    __asm__ __volatile__ ( "movw %%ds, %%ax  \n\t" : "=a" (segment) );
+    GLoaderState->original_ds = segment;
+
     const char *envr = getenv("IS_2INE");
     GLoaderState->subprocess = (envr != NULL);
     GLoaderState->initOs2Tib = initOs2Tib;
     GLoaderState->deinitOs2Tib = deinitOs2Tib;
+    GLoaderState->findSelector = findSelector;
+    GLoaderState->freeSelector = freeSelector;
+    GLoaderState->convert1616to32 = convert1616to32;
     GLoaderState->loadModule = loadLxModuleByModuleName;
     GLoaderState->locatePathCaseInsensitive = locatePathCaseInsensitive;
     GLoaderState->makeUnixPath = makeUnixPath;

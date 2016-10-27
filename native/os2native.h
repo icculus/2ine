@@ -1,11 +1,16 @@
-#ifndef _INCL_NATIVE_H_
-#define _INCL_NATIVE_H_
+#ifndef _INCL_OS2NATIVE_H_
+#define _INCL_OS2NATIVE_H_
 
+#define _POSIX_C_SOURCE 199309
+#define _BSD_SOURCE
+#define _GNU_SOURCE
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <assert.h>
 #include <pthread.h>
 #include <errno.h>
+#include <sys/mman.h>
 
 #include "os2types.h"
 #include "os2errors.h"
@@ -28,7 +33,7 @@ void OS2EXPORT lxNativeModuleDeinit(void);
         initcode; \
         static const LxExport lx_native_exports[] = {
 
-#define LX_NATIVE_EXPORT(fn, ord) { ord, #fn, fn }
+#define LX_NATIVE_EXPORT(fn, ord) { ord, #fn, fn, NULL }
 
 #define LX_NATIVE_MODULE_INIT_END() \
     }; \
@@ -38,5 +43,5 @@ void OS2EXPORT lxNativeModuleDeinit(void);
 
 #endif
 
-// end of native.h ...
+// end of os2native.h ...
 

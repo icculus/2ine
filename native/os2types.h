@@ -19,6 +19,20 @@ extern "C" {
 #define OS2API APIENTRY OS2EXPORT
 #endif
 
+// Note that we never export actual 16-bit APIs from these headers, even if
+//  we have them marked as OS2API16. This is just for documentation's sake at
+//  the moment. If you compile against these headers and link against an
+//  OS2API16 function, they will be exist and operate in a linear address
+//  space. If you call them from an LX executable, though, the system assumes
+//  you're calling in from 16-bit code and exports something that cleans up
+//  the details behind the scenes.
+// For developing against this API directly on Linux, you should assume this
+//  works like OS/2's PowerPC port, and the same 16-bit APIs you used on x86
+//  were made 32-bit clean by default for the new platform.
+#ifndef OS2API16
+#define OS2API16 OS2API
+#endif
+
 typedef uint32_t APIRET;
 typedef uint16_t APIRET16;
 typedef uint32_t APIRET32;
@@ -51,6 +65,7 @@ typedef HANDLE HEV, *PHEV;
 typedef HANDLE HMTX, *PHMTX;
 typedef HANDLE PID, *PPID;
 typedef HANDLE TID, *PTID;
+typedef SHANDLE HVIO, *PHVIO;
 typedef PCHAR PSZ;
 
 typedef int (APIENTRY *PFN)(void);
