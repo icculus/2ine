@@ -1426,7 +1426,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
     } // if
 
     if (lx->non_resident_name_table_offset && lx->non_resident_name_table_len) {
-        if (!loadLxNameTable(retval, exe + lx->non_resident_name_table_offset))
+        if (!loadLxNameTable(retval, origexe + lx->non_resident_name_table_offset))
             goto loadlx_failed;
     } // if
 
