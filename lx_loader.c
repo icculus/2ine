@@ -341,74 +341,6 @@ static int decompressIterated(uint8 *dst, uint32 dstlen, const uint8 *src, uint3
     return 1;
 } // decompressIterated
 
-
-static void missingEntryPointCalled(const char *module, const char *entry)
-{
-    void ***ebp = NULL;
-    __asm__ __volatile__ ( "movl %%ebp, %%eax  \n\t" : "=a" (ebp) );
-    void *caller = ebp[0][1];
-
-    fflush(stdout);
-    fflush(stderr);
-    fprintf(stderr, "\n\nMissing entry point '%s' in module '%s' called at %p!\n", entry, module, caller);
-    fprintf(stderr, "Aborting.\n\n\n");
-    //STUBBED("output backtrace");
-    fflush(stderr);
-    _exit(1);
-} // missing_ordinal_called
-
-static void *generateMissingTrampoline(const char *_module, const char *_entry)
-{
-    static void *page = NULL;
-    static uint32 pageused = 0;
-    static uint32 pagesize = 0;
-
-    if (pagesize == 0)
-        pagesize = getpagesize();
-
-    if ((!page) || ((pagesize - pageused) < 32))
-    {
-        if (page)
-            mprotect(page, pagesize, PROT_READ | PROT_EXEC);
-        page = valloc(pagesize);
-        mprotect(page, pagesize, PROT_READ | PROT_WRITE | PROT_EXEC);
-        pageused = 0;
-    } // if
-
-    void *trampoline = page + pageused;
-    char *ptr = (char *) trampoline;
-    char *module = strdup(_module);
-    char *entry = strdup(_entry);
-
-    *(ptr++) = 0x55;  // pushl %ebp
-    *(ptr++) = 0x89;  // movl %esp,%ebp
-    *(ptr++) = 0xE5;  //   ...movl %esp,%ebp
-    *(ptr++) = 0x68;  // pushl immediate
-    memcpy(ptr, &entry, sizeof (char *));
-    ptr += sizeof (uint32);
-    *(ptr++) = 0x68;  // pushl immediate
-    memcpy(ptr, &module, sizeof (char *));
-    ptr += sizeof (uint32);
-    *(ptr++) = 0xB8;  // movl immediate to %eax
-    const void *fn = missingEntryPointCalled;
-    memcpy(ptr, &fn, sizeof (void *));
-    ptr += sizeof (void *);
-    *(ptr++) = 0xFF;  // call absolute in %eax.
-    *(ptr++) = 0xD0;  //   ...call absolute in %eax.
-
-    const uint32 trampoline_len = (uint32) (ptr - ((char *) trampoline));
-    assert(trampoline_len <= 32);
-    pageused += trampoline_len;
-
-    if (pageused % 4)  // keep these aligned to 32 bits.
-        pageused += (4 - (pageused % 4));
-
-    //printf("Generated trampoline %p for module '%s' export '%s'\n", trampoline, module, entry);
-
-    return trampoline;
-} // generateMissingTrampoline
-
-
 // !!! FIXME: mutex this
 static int allocateSelector(const uint16 selector, const uint32 addr, const unsigned int contents, const int is32bit)
 {
@@ -520,6 +452,7 @@ static void *convert1616to32(const uint32 addr1616)
     const uint16 selector = (uint16) (addr1616 >> 19);  // slide segment down, and shift out control bits.
     const uint16 offset = (uint16) (addr1616 % 0x10000);  // all our LDT segments start at 64k boundaries (at the moment!).
     assert(GLoaderState->ldt[selector] != 0);
+    //printf("convert1616to32: 0x%X -> %p\n", (uint) addr1616, (void *) (size_t) (GLoaderState->ldt[selector] + offset));
     return (void *) (size_t) (GLoaderState->ldt[selector] + offset);
 } // convert1616to32
 
@@ -615,6 +548,171 @@ static void deinitOs2Tib(const uint16 selector)
     const long rc = syscall(SYS_set_thread_area, &entry);
     assert(rc == 0);  FIXME("this can legit fail, though!");
 } // deinitOs2Tib
+
+
+static void missingEntryPointCalled(const char *module, const char *entry)
+{
+    fflush(stdout);
+    fflush(stderr);
+    fprintf(stderr, "\n\nMissing entry point '%s' in module '%s'!\n", entry, module);
+    fprintf(stderr, "Aborting.\n\n\n");
+    //STUBBED("output backtrace");
+    fflush(stderr);
+    _exit(1);
+} // missing_ordinal_called
+
+static void *generateMissingTrampoline(const char *_module, const char *_entry)
+{
+    static void *page = NULL;
+    static uint32 pageused = 0;
+    static uint32 pagesize = 0;
+
+    if (pagesize == 0)
+        pagesize = getpagesize();
+
+    if ((!page) || ((pagesize - pageused) < 32))
+    {
+        if (page)
+            mprotect(page, pagesize, PROT_READ | PROT_EXEC);
+        page = mmap(NULL, pagesize, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        pageused = 0;
+    } // if
+
+    void *trampoline = page + pageused;
+    char *ptr = (char *) trampoline;
+    char *module = strdup(_module);
+    char *entry = strdup(_entry);
+
+    *(ptr++) = 0x55;  // pushl %ebp
+    *(ptr++) = 0x89;  // movl %esp,%ebp
+    *(ptr++) = 0xE5;  //   ...movl %esp,%ebp
+    *(ptr++) = 0x68;  // pushl immediate
+    memcpy(ptr, &entry, sizeof (char *));
+    ptr += sizeof (uint32);
+    *(ptr++) = 0x68;  // pushl immediate
+    memcpy(ptr, &module, sizeof (char *));
+    ptr += sizeof (uint32);
+    *(ptr++) = 0xB8;  // movl immediate to %eax
+    const void *fn = missingEntryPointCalled;
+    memcpy(ptr, &fn, sizeof (void *));
+    ptr += sizeof (void *);
+    *(ptr++) = 0xFF;  // call absolute in %eax.
+    *(ptr++) = 0xD0;  //   ...call absolute in %eax.
+
+    const uint32 trampoline_len = (uint32) (ptr - ((char *) trampoline));
+    assert(trampoline_len <= 32);
+    pageused += trampoline_len;
+
+    if (pageused % 4)  // keep these aligned to 32 bits.
+        pageused += (4 - (pageused % 4));
+
+    //printf("Generated trampoline %p for module '%s' export '%s'\n", trampoline, module, entry);
+
+    return trampoline;
+} // generateMissingTrampoline
+
+static void *generateMissingTrampoline16(const char *_module, const char *_entry, const LxExport **_lxexp)
+{
+    static void *page = NULL;
+    static uint32 pageused = 0;
+    const uint32 pagesize = 0x10000;
+    static uint16 selector = 0xFFFF;
+
+    if ((!page) || ((pagesize - pageused) < 64))
+    {
+        if (page)
+            mprotect(page, pagesize, PROT_READ | PROT_EXEC);
+        page = mmap(NULL, pagesize * 2, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        const size_t diff = (((size_t)page) % 0x10000);
+        if (diff) {  // align to 64k, unmap the difference.
+            void *origpage = page;
+            page = ((uint8 *) page) + (0x10000 - diff);
+            munmap(origpage, 0x10000 - diff);
+        } else {
+            munmap(((uint8 *)page) + 0x10000, 0x10000);  // unmap the extra half we didn't need.
+        } // else
+
+        pageused = 0;
+        uint16 offset = 0xFFFF;
+        selector = 0xFFFF;
+        findSelector((uint32) page, &selector, &offset);
+        assert(selector != 0xFFFF);
+        assert(offset == 0);
+    } // if
+
+    void *trampoline = page + pageused;
+    char *ptr = (char *) trampoline;
+    char *module = strdup(_module);
+    char *entry = strdup(_entry);
+
+    // convert stack to linear address...
+    *(ptr++) = 0x8C;  /* mov ax,ss... */
+    *(ptr++) = 0xD0;  /*  ...mov ax,ss */
+    *(ptr++) = 0xC1;  /* shr ax,byte 0x3... */
+    *(ptr++) = 0xE8;  /*  ...shr ax,byte 0x3 */
+    *(ptr++) = 0x03;  /*  ...shr ax,byte 0x3 */
+    *(ptr++) = 0x66;  /* shl eax,byte 0x10... */
+    *(ptr++) = 0xC1;  /*  ...shl eax,byte 0x10 */
+    *(ptr++) = 0xE0;  /*  ...shl eax,byte 0x10 */
+    *(ptr++) = 0x10;  /*  ...shl eax,byte 0x10 */
+    *(ptr++) = 0x89;  /* mov ax,sp... */
+    *(ptr++) = 0xE0;  /*  ...mov ax,sp */
+    // jmp to 32-bit code...
+    *(ptr++) = 0x66;  /* jmp dword 0x7788:0x33332222... */
+    *(ptr++) = 0xEA;  /*  ...jmp dword 0x7788:0x33332222 */
+    const uint32 jmp32addr = (uint32) (ptr + 6);
+    memcpy(ptr, &jmp32addr, 4); ptr += 4;
+    memcpy(ptr, &GLoaderState->original_cs, 2); ptr += 2;
+    // now we're in 32-bit land again.
+    *(ptr++) = 0x66;  /* mov cx,0xabcd... */
+    *(ptr++) = 0xB9;  /*  ...mov cx,0xabcd */
+    memcpy(ptr, &GLoaderState->original_ss, 2); ptr += 2;
+    *(ptr++) = 0x8E;  /* mov ss,ecx... */
+    *(ptr++) = 0xD1;  /*  ...mov ss,ecx */
+    *(ptr++) = 0x89;  /* mov esp,eax... */
+    *(ptr++) = 0xC4;  /*  ...mov esp,eax */
+    *(ptr++) = 0x66;  /* mov cx,0x8888... */
+    *(ptr++) = 0xB9;  /*  ...mov cx,0x8888 */
+    memcpy(ptr, &GLoaderState->original_ds, 2); ptr += 2;
+    *(ptr++) = 0x8E;  /* mov ds,ecx... */
+    *(ptr++) = 0xD9;  /*  ...mov ds,ecx */
+    // okay, CPU is in a sane state again, call the trampoline. Don't bother cleaning up.
+    *(ptr++) = 0x68;  // pushl immediate
+    memcpy(ptr, &entry, sizeof (char *));
+    ptr += sizeof (uint32);
+    *(ptr++) = 0x68;  // pushl immediate
+    memcpy(ptr, &module, sizeof (char *));
+    ptr += sizeof (uint32);
+    *(ptr++) = 0xB8;  // movl immediate to %eax
+
+    const void *fn = missingEntryPointCalled;
+    memcpy(ptr, &fn, sizeof (void *));
+    ptr += sizeof (void *);
+    *(ptr++) = 0xFF;  // call absolute in %eax.
+    *(ptr++) = 0xD0;  //   ...call absolute in %eax.
+    // (and never return.)
+
+    const uint32 trampoline_len = (uint32) (ptr - ((char *) trampoline));
+    assert(trampoline_len <= 64);
+    pageused += trampoline_len;
+
+    if (pageused % 4)  // keep these aligned to 32 bits.
+        pageused += (4 - (pageused % 4));
+
+    //printf("Generated trampoline %p for module '%s' 16-bit export '%s'\n", trampoline, module, entry);
+
+    // this hack is not thread safe and only works at all because we don't store this long-term.
+    static LxExport lxexp;
+    static LxMmaps lxmmap;
+    lxexp.addr = trampoline;
+    lxexp.object = &lxmmap;
+    lxmmap.mapped = lxmmap.addr = page;
+    lxmmap.size = 0x10000;
+    lxmmap.alias = selector;
+    *_lxexp = &lxexp;
+
+    return trampoline;
+} // generateMissingTrampoline16
 
 static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int argc, char **argv, char **envp)
 {
@@ -789,7 +887,7 @@ static void freeLxModule(LxModule *lxmod)
 
 static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int dependency_tree_depth);
 
-static void *getModuleProcAddrByOrdinal(const LxModule *module, const uint32 ordinal, const LxExport **_lxexp)
+static void *getModuleProcAddrByOrdinal(const LxModule *module, const uint32 ordinal, const LxExport **_lxexp, const int want16bit)
 {
     //printf("lookup module == '%s', ordinal == %u\n", module->name, (uint) ordinal);
 
@@ -811,13 +909,13 @@ static void *getModuleProcAddrByOrdinal(const LxModule *module, const uint32 ord
     #if 1
     char entry[128];
     snprintf(entry, sizeof (entry), "ordinal #%u", (uint) ordinal);
-    return generateMissingTrampoline(module->name, entry);
+    return want16bit ? generateMissingTrampoline16(module->name, entry, _lxexp) : generateMissingTrampoline(module->name, entry);
     #else
     return NULL;
     #endif
 } // getModuleProcAddrByOrdinal
 
-static void *getModuleProcAddrByName(const LxModule *module, const char *name, const LxExport **_lxexp)
+static void *getModuleProcAddrByName(const LxModule *module, const char *name, const LxExport **_lxexp, const int want16bit)
 {
     //printf("lookup module == '%s', name == '%s'\n", module->name, name);
 
@@ -837,7 +935,7 @@ static void *getModuleProcAddrByName(const LxModule *module, const char *name, c
         *_lxexp = NULL;
 
     #if 1
-    return generateMissingTrampoline(module->name, name);
+    return want16bit ? generateMissingTrampoline16(module->name, name, _lxexp) : generateMissingTrampoline(module->name, name);
     #else
     return NULL;
     #endif
@@ -994,7 +1092,7 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
                     fprintf(stderr, "uhoh, looking for module ordinal %u, but only %u available.\n", (uint) moduleid, (uint) lx->num_import_mod_entries);
                 } else {
                     //printf("import-by-ordinal fixup: module=%u import=%u\n", (uint) moduleid, (uint) importid);
-                    finalval = (uint32) (size_t) getModuleProcAddrByOrdinal(lxmod->dependencies[moduleid-1], importid, &lxexp);
+                    finalval = (uint32) (size_t) getModuleProcAddrByOrdinal(lxmod->dependencies[moduleid-1], importid, &lxexp, fixup_to_alias);
                 } // else
 
                 if (fixup_to_alias) {
@@ -1040,7 +1138,7 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
                     memcpy(name, import_name, namelen);
                     name[namelen] = '\0';
                     //printf("import-by-name fixup: module=%u import='%s'\n", (uint) moduleid, name);
-                    finalval = (uint32) (size_t) getModuleProcAddrByName(lxmod->dependencies[moduleid-1], name, &lxexp);
+                    finalval = (uint32) (size_t) getModuleProcAddrByName(lxmod->dependencies[moduleid-1], name, &lxexp, fixup_to_alias);
                 } // else
 
                 if (fixup_to_alias) {
@@ -1228,7 +1326,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
                 vsize += 0x10000;  // make sure we can align to a 64k boundary.
         } // if
 
-        const int mmapflags = MAP_ANON | MAP_PRIVATE | (isDLL ? 0 : MAP_FIXED);
+        const int mmapflags = MAP_ANONYMOUS | MAP_PRIVATE | (isDLL ? 0 : MAP_FIXED);
         void *base = isDLL ? NULL : (void *) ((size_t) obj->reloc_base_addr);
         void *mmapaddr = mmap(base, vsize, PROT_READ|PROT_WRITE, mmapflags, -1, 0);
         // we'll mprotect() these pages to the proper permissions later.
