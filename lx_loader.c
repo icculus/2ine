@@ -463,7 +463,7 @@ static void *convert1616to32(const uint32 addr1616)
 //  pray that covers it. If we have to tile _every_ thread's stack, we can do
 //  that later.
 // !!! FIXME: if we do this for secondary thread stacks, we'll need to mutex this.
-static void initOs2StackSegments(uint32 addr, uint32 stacklen)
+static void initOs2StackSegments(uint32 addr, uint32 stacklen, const int deinit)
 {
     //printf("base == %p, stacklen == %u\n", (void*)addr, (uint) stacklen);
     const uint32 diff = addr % 0x10000;
@@ -477,9 +477,13 @@ static void initOs2StackSegments(uint32 addr, uint32 stacklen)
     // !!! FIXME: do we have to allocate these backwards? (stack grows down).
     while (stacklen) {
         //printf("Allocating selector 0x%X for stack %p ... \n", (uint) (addr >> 16), (void *) addr);
-        if (!allocateSelector((uint16) (addr >> 16), addr, MODIFY_LDT_CONTENTS_DATA/*STACK*/, 0)) {
-            FIXME("uhoh, couldn't set up an LDT entry for a stack segment! Might crash later!");
-        } // if
+        if (deinit) {
+            freeSelector((uint16) (addr >> 16));
+        } else {
+            if (!allocateSelector((uint16) (addr >> 16), addr, MODIFY_LDT_CONTENTS_DATA/*STACK*/, 0)) {
+                FIXME("uhoh, couldn't set up an LDT entry for a stack segment! Might crash later!");
+            } // if
+        } // else
         stacklen -= 0x10000;
         addr += 0x10000;
     } // while
@@ -528,9 +532,9 @@ static uint16 initOs2Tib(uint8 *tibspace, void *_topOfStack, const size_t stackl
     const long rc = syscall(SYS_set_thread_area, &entry);
     assert(rc == 0);  FIXME("this can legit fail, though!");
 
-    // I have no idea why this needs the "<< 3 | 3", but it's probably
-    //  specified in the Intel manuals. I got this from looking at how
-    //  Wine does it. I still don't know why.
+    // The "<< 3 | 3" makes this a GDT selector at ring 3 permissions.
+    //  If this did "| 7" instead of "| 3", it'd be an LDT selector.
+    //  Use findSelector() or allocateSelector() for LDT entries, though!
     const unsigned int segment = (entry.entry_number << 3) | 3;
     __asm__ __volatile__ ( "movw %%ax, %%fs  \n\t" : : "a" (segment) );
     return (uint16) entry.entry_number;
@@ -549,17 +553,47 @@ static void deinitOs2Tib(const uint16 selector)
     assert(rc == 0);  FIXME("this can legit fail, though!");
 } // deinitOs2Tib
 
+static void freeLxModule(LxModule *lxmod);
+
+static __attribute__((noreturn)) void terminate(const uint32 exitcode)
+{
+    freeLxModule(GLoaderState->main_module);
+
+    // clear out anything that is still loaded...
+    while (GLoaderState->loaded_modules) {
+        LxModule *lowest_mod = GLoaderState->loaded_modules;
+        for (LxModule *i = GLoaderState->loaded_modules; i; i = i->next) {
+            if (i->refcount < lowest_mod->refcount)
+                lowest_mod = i;
+        } // for
+        freeLxModule(lowest_mod);
+    } // while
+
+    // OS/2's docs say this only keeps the lower 16 bits of exitcode.
+    // !!! FIXME: ...but Unix only keeps the lowest 8 bits. Will have to
+    // !!! FIXME:  tapdance to pass larger values back to OS/2 parent processes.
+    if (exitcode > 255)
+        FIXME("deal with process exit codes > 255. We clamped this one!");
+
+    _exit((int) (exitcode & 0xFF));
+} // terminate
+
+static __attribute__((noreturn)) void endLxProcess(const uint32 exitcode)
+{
+    if (GLoaderState->dosExit)
+        GLoaderState->dosExit(1, exitcode);  // let exit lists run. Should call terminate!
+    terminate(exitcode);  // just in case.
+} // endLxProcess
 
 static void missingEntryPointCalled(const char *module, const char *entry)
 {
     fflush(stdout);
     fflush(stderr);
-    fprintf(stderr, "\n\nMissing entry point '%s' in module '%s'!\n", entry, module);
-    fprintf(stderr, "Aborting.\n\n\n");
+    fprintf(stderr, "\n\nMissing entry point '%s' in module '%s'! Aborting.\n\n\n", entry, module);
     //STUBBED("output backtrace");
     fflush(stderr);
-    _exit(1);
-} // missing_ordinal_called
+    terminate(1);
+} // missingEntryPointCalled
 
 static void *generateMissingTrampoline(const char *_module, const char *_entry)
 {
@@ -719,7 +753,7 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
     uint8 *stack = (uint8 *) ((size_t) lxmod->esp);
 
     // ...and you pass it the pointer to argv0. This is (at least as far as the docs suggest) appended to the environment table.
-    fprintf(stderr, "jumping into LX land for exe '%s'...! eip=%p esp=%p\n", lxmod->name, (void *) lxmod->eip, stack); fflush(stderr);
+    //fprintf(stderr, "jumping into LX land for exe '%s'...! eip=%p esp=%p\n", lxmod->name, (void *) lxmod->eip, stack); fflush(stderr);
 
     GLoaderState->running = 1;
 
@@ -741,11 +775,10 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
         "xorl %%ebp,%%ebp  \n\t"
         "ret               \n\t"  // go to OS/2 land!
         "1:                \n\t"  //  ...and return here.
-        "andl $-16, %%esp  \n\t"  // align the stack for macOS.
-        "subl $-4, %%esp   \n\t"   // align the stack for macOS.
-        "pushl %%eax       \n\t"  // call _exit() with whatever is in %eax.
-        "call _exit        \n\t"
-            : // no outputs
+        "pushl %%eax       \n\t"  // push exit code from OS/2 app.
+        "call endLxProcess \n\t"  // never returns.
+        // If we returned here, %eax has the exit code from the app.
+            : // no outputs.
             : "a" (GLoaderState->pib.pib_pchcmd),
               "c" (GLoaderState->pib.pib_pchenv),
               "d" (lxmod), "S" (stack), "D" (lxmod->eip)
@@ -763,7 +796,7 @@ static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
     if (!GLoaderState->running)
         stack = (uint8 *) ((size_t) GLoaderState->main_module->esp);
 
-    fprintf(stderr, "jumping into LX land to %s library '%s'...! eip=%p esp=%p\n", isTermination ? "terminate" : "initialize", lxmod->name, (void *) lxmod->eip, stack); fflush(stderr);
+    //fprintf(stderr, "jumping into LX land to %s library '%s'...! eip=%p esp=%p\n", isTermination ? "terminate" : "initialize", lxmod->name, (void *) lxmod->eip, stack); fflush(stderr);
 
     __asm__ __volatile__ (
         "pushal            \n\t"  // save all the current registers.
@@ -797,7 +830,7 @@ static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
             : "memory"
     );
 
-    fprintf(stderr, "...survived time in LX land!\n"); fflush(stderr);
+    //fprintf(stderr, "...survived time in LX land!\n"); fflush(stderr);
 
     // !!! FIXME: this entry point returns a result...do we abort if it reports error?
     // !!! FIXME: (actually, DosLoadModule() can report that failure. Abort if (GLoaderState->running == 0), though!)
@@ -835,11 +868,11 @@ static void freeLxModule(LxModule *lxmod)
 
     // !!! FIXME: mutex from here
     lxmod->refcount--;
-    fprintf(stderr, "unref'd module '%s' to %u\n", lxmod->name, (uint) lxmod->refcount);
+    //fprintf(stderr, "unref'd module '%s' to %u\n", lxmod->name, (uint) lxmod->refcount);
     if (lxmod->refcount > 0)
         return;  // something is still using it.
 
-    if (lxmod->initialized) {
+    if ((lxmod->initialized) && (lxmod != GLoaderState->main_module)) {
         if (!lxmod->nativelib) {
             runLxLibraryTerm(lxmod);
         } else {
@@ -858,18 +891,23 @@ static void freeLxModule(LxModule *lxmod)
     if (lxmod == GLoaderState->loaded_modules)
         GLoaderState->loaded_modules = lxmod->next;
 
-    if (GLoaderState->main_module == lxmod)
+    if (GLoaderState->main_module == lxmod) {
         GLoaderState->main_module = NULL;
+        LxMmaps *lxmmap = &lxmod->mmaps[lxmod->lx.esp_object - 1];
+        const uint32 stackbase = (uint32) ((size_t)lxmmap->addr);
+        initOs2StackSegments(stackbase, lxmmap->size, 1);
+        lxmmap->mapped = NULL;  // don't unmap the stack we're probably using!
+    } // if
     // !!! FIXME: mutex to here
 
-    for (uint32 i = 0; i < lxmod->lx.num_import_mod_entries; i++)
-        freeLxModule(lxmod->dependencies[i]);
+    for (uint32 i = lxmod->lx.num_import_mod_entries; i > 0; i--)
+        freeLxModule(lxmod->dependencies[i-1]);
     free(lxmod->dependencies);
 
     for (uint32 i = 0; i < lxmod->lx.module_num_objects; i++) {
         if (lxmod->mmaps[i].alias != 0xFFFF)
             freeSelector(lxmod->mmaps[i].alias);
-        if (lxmod->mmaps[i].addr)
+        if (lxmod->mmaps[i].mapped)
             munmap(lxmod->mmaps[i].mapped, lxmod->mmaps[i].size);
     } // for
     free(lxmod->mmaps);    
@@ -1421,13 +1459,15 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
     // !!! FIXME: "A zero value in this field indicates that the stack pointer is to be initialized to the highest address/offset in the object"
     if (!isDLL) {
         assert(lx->esp_object != 0);
-        const uint32 stackbase = (uint32) ((size_t)retval->mmaps[lx->esp_object - 1].addr);
+        const LxMmaps *lxmmap = &retval->mmaps[lx->esp_object - 1];
+        const uint32 stackbase = (uint32) ((size_t)lxmmap->addr);
+        const uint32 stacksize = (uint32) lxmmap->size;
         retval->esp = lx->esp + stackbase;
 
         // This needs to be set up now, so it's available to any library
         //  init code that runs in LX land.
-        initOs2Tib(GLoaderState->main_tibspace, (void *) ((size_t) retval->esp), retval->mmaps[retval->lx.esp_object - 1].size, 0);
-        initOs2StackSegments(stackbase, retval->mmaps[retval->lx.esp_object - 1].size);
+        initOs2Tib(GLoaderState->main_tibspace, (void *) ((size_t) retval->esp), stacksize, 0);
+        initOs2StackSegments(stackbase, stacksize, 0);
     } // if
 
     // now we have the stack tiled--and it got the specific selectors it
@@ -2030,6 +2070,7 @@ int main(int argc, char **argv, char **envp)
     GLoaderState->locatePathCaseInsensitive = locatePathCaseInsensitive;
     GLoaderState->makeUnixPath = makeUnixPath;
     GLoaderState->makeOS2Path = makeOS2Path;
+    GLoaderState->terminate = terminate;
 
     const char *modulename = GLoaderState->subprocess ? envr : argv[1];
 

@@ -220,6 +220,7 @@ typedef struct LxLoaderState
     uint32 *tlspage;
     uint32 tlsmask;  // one bit for each TLS slot in use.
     uint8 tlsallocs[32];  // number of TLS slots allocated in one block, indexed by starting block (zero if not the starting block).
+    void (*dosExit)(uint32 action, uint32 result);
     uint16 (*initOs2Tib)(uint8 *tibspace, void *_topOfStack, const size_t stacklen, const uint32 tid);
     void (*deinitOs2Tib)(const uint16 selector);
     int (*findSelector)(const uint32 addr, uint16 *outselector, uint16 *outoffset);
@@ -229,6 +230,7 @@ typedef struct LxLoaderState
     int (*locatePathCaseInsensitive)(char *buf);
     char *(*makeUnixPath)(const char *os2path, uint32 *err);
     char *(*makeOS2Path)(const char *fname);
+    void __attribute__((noreturn)) (*terminate)(const uint32 exitcode);
 } LxLoaderState;
 
 typedef const LxExport *(*LxNativeModuleInitEntryPoint)(LxLoaderState *lx_state, uint32 *lx_num_exports);

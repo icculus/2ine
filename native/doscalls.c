@@ -118,6 +118,8 @@ static DirFinder GHDir1;
 
 
 LX_NATIVE_MODULE_DEINIT({
+    GLoaderState->dosExit = NULL;
+
     ExitListItem *next = GExitList;
     GExitList = NULL;
 
@@ -139,6 +141,8 @@ LX_NATIVE_MODULE_DEINIT({
 
 static int initDoscalls(void)
 {
+    GLoaderState->dosExit = DosExit;
+
     if (pthread_mutex_init(&GMutexDosCalls, NULL) == -1) {
         fprintf(stderr, "pthread_mutex_init failed!\n");
         return 0;
@@ -465,15 +469,7 @@ VOID DosExit(ULONG action, ULONG exitcode)
     // terminate the process.
     runDosExitList(TC_EXIT);
 
-    // !!! FIXME: finalize OS/2 DLLs before killing the process?
-
-    // OS/2's docs say this only keeps the lower 16 bits of exitcode.
-    // !!! FIXME: ...but Unix only keeps the lowest 8 bits. Will have to
-    // !!! FIXME:  tapdance to pass larger values back to OS/2 parent processes.
-    if (exitcode > 255)
-        FIXME("deal with process exit codes > 255. We clamped this one!");
-
-    _exit((int) (exitcode & 0xFF));
+    GLoaderState->terminate(exitcode);
 } // DosExit
 
 APIRET DosExitList(ULONG ordercode, PFNEXITLIST fn)
