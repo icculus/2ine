@@ -46,6 +46,24 @@ endif()
 add_definitions(-std=c99 -Wall -ggdb3)
 add_definitions(-D_FILE_OFFSET_BITS=64)
 
+set(CURSES_NEED_WIDE TRUE)
+set(CURSES_NEED_NCURSES TRUE)
+find_package(Curses)
+if(NOT CURSES_FOUND)
+    message(FATAL_ERROR "ncurses not found")
+endif()
+
+include_directories(${CURSES_INCLUDE_DIR})
+if(CURSES_HAVE_NCURSESW_NCURSES_H)
+    add_definitions(-DHAVE_NCURSESW_NCURSES_H)
+elseif(CURSES_HAVE_NCURSESW_CURSES_H)
+    add_definitions(-DHAVE_NCURSESW_CURSES_H)
+elseif(CURSES_HAVE_NCURSESW_H)
+    add_definitions(-DHAVE_NCURSESW_H)
+elseif(CURSES_HAVE_CURSES_H)
+    add_definitions(-DHAVE_CURSES_H)
+endif()
+
 foreach(_I doscalls;msg;nls;quecalls;viocalls;kbdcalls;sesmgr)
     add_library(${_I} SHARED "native/${_I}.c")
     set_target_properties(${_I} PROPERTIES COMPILE_FLAGS "-m32")
@@ -53,6 +71,8 @@ foreach(_I doscalls;msg;nls;quecalls;viocalls;kbdcalls;sesmgr)
 endforeach()
 
 target_link_libraries(doscalls "pthread")
+# FIXME target_link_libraries(viocalls ${CURSES_LIBRARIES})
+target_link_libraries(viocalls ncursesw)
 
 add_executable(lx_dump lx_dump.c)
 

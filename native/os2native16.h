@@ -201,6 +201,12 @@ RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling
     } \
 }
 
+#define LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(typ, var) \
+    const typ var = *((typ *) args); args += sizeof (typ)
+
+#define LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(typ, var) \
+    typ var = (typ) GLoaderState->convert1616to32(*((uint32 *) args)); args += sizeof (uint32)
+
 #define LX_NATIVE_EXPORT16(fn, ord) { ord, #fn, &fn##16, &obj16 }
 
 #endif

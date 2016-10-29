@@ -445,6 +445,7 @@ APIRET OS2API DosQueryFHState(HFILE hFile, PULONG pMode);
 APIRET OS2API DosQueryExtLIBPATH(PSZ pszExtLIBPATH, ULONG flags);
 APIRET OS2API DosSetMaxFH(ULONG cFH);
 APIRET OS2API DosQueryThreadContext(TID tid, ULONG level, PCONTEXTRECORD pcxt);
+ULONG OS2API DosSelToFlat(VOID);
 
 #ifdef __cplusplus
 }

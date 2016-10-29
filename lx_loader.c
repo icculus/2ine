@@ -449,12 +449,34 @@ static void freeSelector(const uint16 selector)
 
 static void *convert1616to32(const uint32 addr1616)
 {
+    if (addr1616 == 0)
+        return NULL;
+
     const uint16 selector = (uint16) (addr1616 >> 19);  // slide segment down, and shift out control bits.
     const uint16 offset = (uint16) (addr1616 % 0x10000);  // all our LDT segments start at 64k boundaries (at the moment!).
     assert(GLoaderState->ldt[selector] != 0);
     //printf("convert1616to32: 0x%X -> %p\n", (uint) addr1616, (void *) (size_t) (GLoaderState->ldt[selector] + offset));
     return (void *) (size_t) (GLoaderState->ldt[selector] + offset);
 } // convert1616to32
+
+static uint32 convert32to1616(void *addr32)
+{
+    if (addr32 == NULL)
+        return 0;
+
+    uint16 selector = 0;
+    uint16 offset = 0;
+    if (!findSelector((uint32) addr32, &selector, &offset)) {
+        fprintf(stderr, "Uhoh, ran out of LDT entries?!\n");
+        return 0;  // oh well, crash, probably.
+    } // if
+
+    //printf("selector: 0x%X\n", (uint) selector);
+    selector = (selector << 3) | 7;
+    //printf("shifted selector: 0x%X\n", (uint) selector);
+    return (((uint32)selector) << 16) | ((uint32) offset);
+} // convert32to1616
+
 
 // EMX (and probably many other things) occasionally has to call a 16-bit
 //  system API, and assumes its stack is tiled in the LDT; it'll just shift
@@ -2066,6 +2088,7 @@ int main(int argc, char **argv, char **envp)
     GLoaderState->findSelector = findSelector;
     GLoaderState->freeSelector = freeSelector;
     GLoaderState->convert1616to32 = convert1616to32;
+    GLoaderState->convert32to1616 = convert32to1616;
     GLoaderState->loadModule = loadLxModuleByPathOrModuleName;
     GLoaderState->locatePathCaseInsensitive = locatePathCaseInsensitive;
     GLoaderState->makeUnixPath = makeUnixPath;

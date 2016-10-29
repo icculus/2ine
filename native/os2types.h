@@ -68,6 +68,7 @@ typedef HANDLE TID, *PTID;
 typedef SHANDLE HVIO, *PHVIO;
 typedef SHANDLE HKBD, *PHKBD;
 typedef PCHAR PSZ;
+typedef PCHAR PCH;
 
 typedef int (APIENTRY *PFN)(void);
 

@@ -240,6 +240,7 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls()) return NULL; })
     LX_NATIVE_EXPORT(DosExitMustComplete, 381),
     LX_NATIVE_EXPORT(DosSetRelMaxFH, 382),
     LX_NATIVE_EXPORT(DosFlatToSel, 425),
+    LX_NATIVE_EXPORT(DosSelToFlat, 426),
     LX_NATIVE_EXPORT(DosAllocThreadLocalMemory, 454),
     LX_NATIVE_EXPORT(DosFreeThreadLocalMemory, 455),
     LX_NATIVE_EXPORT(DosR3ExitAddr, 553),
@@ -619,16 +620,7 @@ APIRET DosSetExceptionHandler(PEXCEPTIONREGISTRATIONRECORD rec)
 ULONG _DosFlatToSel(PVOID ptr)
 {
     TRACE_NATIVE("DosFlatToSel(%p)", ptr);
-
-    uint16 selector = 0;
-    uint16 offset = 0;
-    if (!GLoaderState->findSelector((uint32) ptr, &selector, &offset)) {
-        fprintf(stderr, "Uhoh, ran out of LDT entries?!\n");
-        return 0;  // oh well, crash.
-    } // if
-
-    selector = (selector << 3) | 7;
-    return (((uint32)selector) << 16) | ((uint32) offset);
+    return GLoaderState->convert32to1616(ptr);
 } // _DosFlatToSel
 
 // DosFlatToSel() passes its argument in %eax, so a little asm to bridge that...
@@ -2850,6 +2842,24 @@ APIRET DosQueryThreadContext(TID tid, ULONG level, PCONTEXTRECORD pcxt)
     FIXME("Need to be able to suspend threads first");
     return ERROR_INVALID_PARAMETER;
 } // DosQueryThreadContext
+
+ULONG _DosSelToFlat(void *ptr)
+{
+    TRACE_NATIVE("DosSelToFlat(%p)", ptr);
+    return (ULONG) GLoaderState->convert1616to32((uint32) ptr);
+} // _DosSelToFlat
+
+// DosSelToFlat() passes its argument in %eax, so a little asm to bridge that...
+__asm__ (
+    ".globl DosSelToFlat  \n\t"
+    ".type	DosSelToFlat, @function \n\t"
+    "DosSelToFlat:  \n\t"
+    "    pushl %eax  \n\t"
+    "    call _DosSelToFlat  \n\t"
+    "    addl $4, %esp  \n\t"
+    "    ret  \n\t"
+	".size	_DosSelToFlat, .-_DosSelToFlat  \n\t"
+);
 
 // end of doscalls.c ...
 

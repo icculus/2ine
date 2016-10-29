@@ -226,6 +226,7 @@ typedef struct LxLoaderState
     int (*findSelector)(const uint32 addr, uint16 *outselector, uint16 *outoffset);
     void (*freeSelector)(const uint16 selector);
     void *(*convert1616to32)(const uint32 addr1616);
+    uint32 (*convert32to1616)(void *addr32);
     LxModule *(*loadModule)(const char *modname);
     int (*locatePathCaseInsensitive)(char *buf);
     char *(*makeUnixPath)(const char *os2path, uint32 *err);
