@@ -63,6 +63,7 @@ typedef HANDLE HFILE, *PHFILE;
 typedef HANDLE HDIR, *PHDIR;
 typedef HANDLE HEV, *PHEV;
 typedef HANDLE HMTX, *PHMTX;
+typedef HANDLE HQUEUE, *PHQUEUE;
 typedef HANDLE PID, *PPID;
 typedef HANDLE TID, *PTID;
 typedef SHANDLE HVIO, *PHVIO;
