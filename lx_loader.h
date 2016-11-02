@@ -212,8 +212,9 @@ typedef struct LxLoaderState
     int running;
     int trace_native;
     uint16 original_cs;
-    uint16 original_ss;
     uint16 original_ds;
+    uint16 original_es;
+    uint16 original_ss;
     uint32 ldt[8192];
     char *libpath;
     uint32 libpathlen;

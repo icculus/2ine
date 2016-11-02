@@ -86,8 +86,13 @@ ADD EAX, 4  ; %eax now points to original function arguments on the stack.
 
 PUSH EBX  ; save original ss:sp to stack.
 PUSH DS  ; save off the caller's data segment.
+PUSH ES  ; save off the caller's %es register.
+
 MOV CX, 0x8888  ; restore our linear data segment.
 MOV DS, CX
+
+MOV CX, 0x9999  ; restore %es register.
+MOV ES, CX
 
 PUSH EAX  ; make this the sole argument to the bridge function.
 MOV EAX, 0x55555555  ; absolute address of our 32-bit bridging function in C.
@@ -95,6 +100,7 @@ CALL [EAX]  ; call our 32-bit bridging function in C.
 ; don't touch EAX anymore, it has the return value now!
 ADD ESP, 4  ; dump our function argument.
 
+POP ES  ; get back caller's %es register.
 POP DS  ; get back our 16-bit data segment.
 
 ; Restore 16:16 stack.  !!! FIXME: can use LSS if we figure out prefix and DS politics.
@@ -152,11 +158,17 @@ RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling
     *(ptr++) = 0x04;  /*  ...add eax,byte +0x4 */ \
     *(ptr++) = 0x53;  /* push ebx */ \
     *(ptr++) = 0x1E;  /* push ds */ \
+    *(ptr++) = 0x06;  /* push es */ \
     *(ptr++) = 0x66;  /* mov cx,0x8888... */ \
     *(ptr++) = 0xB9;  /*  ...mov cx,0x8888 */ \
     memcpy(ptr, &GLoaderState->original_ds, 2); ptr += 2; \
     *(ptr++) = 0x8E;  /* mov ds,ecx... */ \
     *(ptr++) = 0xD9;  /*  ...mov ds,ecx */ \
+    *(ptr++) = 0x66;  /* mov cx,0x9999... */ \
+    *(ptr++) = 0xB9;  /*  ...mov cx,0x9999 */ \
+    memcpy(ptr, &GLoaderState->original_es, 2); ptr += 2; \
+    *(ptr++) = 0x8E;  /* mov es,ecx... */ \
+    *(ptr++) = 0xC1;  /*  ...mov es,ecx */ \
     *(ptr++) = 0x50;  /* push eax */ \
     *(ptr++) = 0xB8;  /* mov eax,0x55555555... */ \
     const uint32 callbridgeaddr = (uint32) bridge16to32_##fn; \
@@ -166,6 +178,7 @@ RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling
     *(ptr++) = 0x83;  /* add esp,byte +0x4... */ \
     *(ptr++) = 0xC4;  /*  ...add esp,byte +0x4 */ \
     *(ptr++) = 0x04;  /*  ...add esp,byte +0x4 */ \
+    *(ptr++) = 0x07;  /* pop es */ \
     *(ptr++) = 0x1F;  /* pop ds */ \
     *(ptr++) = 0x66;  /* pop bx... */ \
     *(ptr++) = 0x5B;  /*  ...pop bx */ \

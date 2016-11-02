@@ -730,8 +730,11 @@ static void *generateMissingTrampoline16(const char *_module, const char *_entry
     *(ptr++) = 0x66;  /* mov cx,0x8888... */
     *(ptr++) = 0xB9;  /*  ...mov cx,0x8888 */
     memcpy(ptr, &GLoaderState->original_ds, 2); ptr += 2;
-    *(ptr++) = 0x8E;  /* mov ds,ecx... */
-    *(ptr++) = 0xD9;  /*  ...mov ds,ecx */
+    *(ptr++) = 0x66;  /* mov cx,0x8888... */
+    *(ptr++) = 0xB9;  /*  ...mov cx,0x8888 */
+    memcpy(ptr, &GLoaderState->original_es, 2); ptr += 2;
+    *(ptr++) = 0x8E;  /* mov es,ecx... */ \
+    *(ptr++) = 0xC1;  /*  ...mov es,ecx */ \
     // okay, CPU is in a sane state again, call the trampoline. Don't bother cleaning up.
     *(ptr++) = 0x68;  // pushl immediate
     memcpy(ptr, &entry, sizeof (char *));
@@ -2076,10 +2079,12 @@ int main(int argc, char **argv, char **envp)
     unsigned int segment = 0;
     __asm__ __volatile__ ( "movw %%cs, %%ax  \n\t" : "=a" (segment) );
     GLoaderState->original_cs = segment;
-    __asm__ __volatile__ ( "movw %%ss, %%ax  \n\t" : "=a" (segment) );
-    GLoaderState->original_ss = segment;
     __asm__ __volatile__ ( "movw %%ds, %%ax  \n\t" : "=a" (segment) );
     GLoaderState->original_ds = segment;
+    __asm__ __volatile__ ( "movw %%es, %%ax  \n\t" : "=a" (segment) );
+    GLoaderState->original_es = segment;
+    __asm__ __volatile__ ( "movw %%ss, %%ax  \n\t" : "=a" (segment) );
+    GLoaderState->original_ss = segment;
 
     const char *envr = getenv("IS_2INE");
     GLoaderState->subprocess = (envr != NULL);
