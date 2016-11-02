@@ -1,4 +1,4 @@
-#include "os2native.h"
+#include "os2native16.h"
 #include "doscalls.h"
 
 #include <unistd.h>
@@ -35,6 +35,17 @@ APIRET OS2API DosQuerySysState(ULONG func, ULONG arg1, ULONG pid, ULONG _res_, P
 
 // This is also undocumented (no idea about this at all, including function params). Of course, Java uses it.
 APIRET DosR3ExitAddr(void);
+
+// These are 16-bit APIs that aren't in the 4.5 toolkit headers. Yeah, Java uses them! Winging it.
+typedef int HSEM16, *PHSEM16;
+static APIRET16 DosSemRequest(PHSEM16 sem, LONG ms);
+static APIRET16 DosSemClear(PHSEM16 sem);
+static APIRET16 DosSemWait(PHSEM16 sem, LONG ms);
+static APIRET16 DosSemSet(PHSEM16 sem);
+static APIRET16 bridge16to32_DosSemRequest(uint8 *args);
+static APIRET16 bridge16to32_DosSemClear(uint8 *args);
+static APIRET16 bridge16to32_DosSemWait(uint8 *args);
+static APIRET16 bridge16to32_DosSemSet(uint8 *args);
 
 
 static pthread_mutex_t GMutexDosCalls;
@@ -117,6 +128,13 @@ typedef struct
 static DirFinder GHDir1;
 
 
+LX_NATIVE_MODULE_16BIT_SUPPORT()
+    LX_NATIVE_MODULE_16BIT_API(DosSemRequest)
+    LX_NATIVE_MODULE_16BIT_API(DosSemClear)
+    LX_NATIVE_MODULE_16BIT_API(DosSemWait)
+    LX_NATIVE_MODULE_16BIT_API(DosSemSet)
+LX_NATIVE_MODULE_16BIT_SUPPORT_END()
+
 LX_NATIVE_MODULE_DEINIT({
     GLoaderState->dosExit = NULL;
 
@@ -137,10 +155,19 @@ LX_NATIVE_MODULE_DEINIT({
     MaxHFiles = 0;
 
     pthread_mutex_destroy(&GMutexDosCalls);
+
+    LX_NATIVE_MODULE_DEINIT_16BIT_SUPPORT();
 })
 
 static int initDoscalls(void)
 {
+    LX_NATIVE_MODULE_INIT_16BIT_SUPPORT()
+        LX_NATIVE_INIT_16BIT_BRIDGE(DosSemRequest, 8)
+        LX_NATIVE_INIT_16BIT_BRIDGE(DosSemClear, 4)
+        LX_NATIVE_INIT_16BIT_BRIDGE(DosSemWait, 8)
+        LX_NATIVE_INIT_16BIT_BRIDGE(DosSemSet, 4)
+    LX_NATIVE_MODULE_INIT_16BIT_SUPPORT_END()
+
     GLoaderState->dosExit = DosExit;
 
     if (pthread_mutex_init(&GMutexDosCalls, NULL) == -1) {
@@ -183,6 +210,10 @@ static int initDoscalls(void)
 } // initDoscalls
 
 LX_NATIVE_MODULE_INIT({ if (!initDoscalls()) return NULL; })
+    LX_NATIVE_EXPORT16(DosSemRequest, 140),
+    LX_NATIVE_EXPORT16(DosSemClear, 141),
+    LX_NATIVE_EXPORT16(DosSemWait, 142),
+    LX_NATIVE_EXPORT16(DosSemSet, 143),
     LX_NATIVE_EXPORT(DosSetMaxFH, 209),
     LX_NATIVE_EXPORT(DosSetPathInfo, 219),
     LX_NATIVE_EXPORT(DosQueryPathInfo, 223),
@@ -2860,6 +2891,109 @@ __asm__ (
     "    ret  \n\t"
 	".size	_DosSelToFlat, .-_DosSelToFlat  \n\t"
 );
+
+static inline int trySpinLock(int *lock)
+{
+    return (__sync_lock_test_and_set(lock, 1) == 0);
+} // trySpinLock
+
+static APIRET16 DosSemRequest(PHSEM16 sem, LONG ms)
+{
+    TRACE_NATIVE("DosSemRequest(%p, %u)", sem, (uint) ms);
+    if (ms == 0) {
+        return !trySpinLock(sem) ? ERROR_TIMEOUT : NO_ERROR;
+    } else if (ms < 0) {
+        while (!trySpinLock(sem))
+            usleep(1000);
+        return NO_ERROR;
+    }
+
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+    const uint64 end = (((uint64) ts.tv_sec) * 1000) + (((uint64) ts.tv_nsec) / 1000000) + ms;
+
+    while (1) {
+        if (trySpinLock(sem))
+            return NO_ERROR;
+        clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+        const uint64 now = (((uint64) ts.tv_sec) * 1000) + (((uint64) ts.tv_nsec) / 1000000);
+        if (now >= end)
+            return ERROR_TIMEOUT;
+        usleep(1000);
+    } // while
+
+    return NO_ERROR;
+} // DosSemRequest
+
+static APIRET16 DosSemClear(PHSEM16 sem)
+{
+    TRACE_NATIVE("DosSemClear(%p)", sem);
+    __sync_lock_release(sem);
+    return NO_ERROR;
+} // DosSemClear
+
+static APIRET16 DosSemWait(PHSEM16 sem, LONG ms)
+{
+    TRACE_NATIVE("DosSemWait(%p, %u)", sem, (uint) ms);
+    if (ms == 0) {
+        return __sync_bool_compare_and_swap(sem, 0, 1) ? NO_ERROR : ERROR_TIMEOUT;
+    } else if (ms < 0) {
+        while (!__sync_bool_compare_and_swap(sem, 0, 1))
+            usleep(1000);
+        return NO_ERROR;
+    }
+
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+    const uint64 end = (((uint64) ts.tv_sec) * 1000) + (((uint64) ts.tv_nsec) / 1000000) + ms;
+
+    while (1) {
+        if (__sync_bool_compare_and_swap(sem, 0, 1))
+            return NO_ERROR;
+        clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+        const uint64 now = (((uint64) ts.tv_sec) * 1000) + (((uint64) ts.tv_nsec) / 1000000);
+        if (now >= end)
+            return ERROR_TIMEOUT;
+        usleep(1000);
+    } // while
+
+    return NO_ERROR;
+} // DosSemWait
+
+static APIRET16 DosSemSet(PHSEM16 sem)
+{
+    TRACE_NATIVE("DosSemSet(%p)", sem);
+    __sync_bool_compare_and_swap(sem, 1, 0);
+    return NO_ERROR;
+} // DosSemSet
+
+static APIRET16 bridge16to32_DosSemRequest(uint8 *args)
+{
+    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(LONG, ms);
+    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PHSEM16, sem);
+    return DosSemRequest(sem, ms);
+} // bridge16to32_DosSemRequest
+
+static APIRET16 bridge16to32_DosSemClear(uint8 *args)
+{
+    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PHSEM16, sem);
+    return DosSemClear(sem);
+} // bridge16to32_DosSemClear
+
+static APIRET16 bridge16to32_DosSemWait(uint8 *args)
+{
+    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(LONG, ms);
+    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PHSEM16, sem);
+    return DosSemWait(sem, ms);
+} // bridge16to32_DosSemWait
+
+static APIRET16 bridge16to32_DosSemSet(uint8 *args)
+{
+    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PHSEM16, sem);
+    return DosSemSet(sem);
+} // bridge16to32_DosSemSet
 
 // end of doscalls.c ...
 

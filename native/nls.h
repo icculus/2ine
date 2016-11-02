@@ -7,14 +7,33 @@
 extern "C" {
 #endif
 
-typedef struct COUNTRYCODE
+typedef struct
 {
     ULONG country;
     ULONG codepage;
 } COUNTRYCODE, *PCOUNTRYCODE;
 
+typedef struct
+{
+    ULONG country;
+    ULONG codepage;
+    ULONG fsDateFmt;
+    CHAR szCurrency[5];
+    CHAR szThousandsSeparator[2];
+    CHAR szDecimal[2];
+    CHAR szDateSeparator[2];
+    CHAR szTimeSeparator[2];
+    UCHAR fsCurrencyFmt;
+    UCHAR cDecimalPlace;
+    UCHAR fsTimeFmt;
+    USHORT abReserved1[2];
+    CHAR szDataSeparator[2];
+    USHORT abReserved2[5];
+} COUNTRYINFO, *PCOUNTRYINFO;
+
 APIRET OS2API DosQueryDBCSEnv(ULONG cb, PCOUNTRYCODE pcc, PCHAR pBuf);
 APIRET OS2API DosMapCase(ULONG cb, PCOUNTRYCODE pcc, PCHAR pch);
+APIRET OS2API DosQueryCtryInfo(ULONG cb, PCOUNTRYCODE pcc, PCOUNTRYINFO pci, PULONG pcbActual);
 
 #ifdef __cplusplus
 }
