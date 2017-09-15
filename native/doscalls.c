@@ -258,6 +258,7 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls()) return NULL; })
     LX_NATIVE_EXPORT(DosWaitEventSem, 329),
     LX_NATIVE_EXPORT(DosQueryEventSem, 330),
     LX_NATIVE_EXPORT(DosCreateMutexSem, 331),
+    LX_NATIVE_EXPORT(DosCloseMutexSem, 333),
     LX_NATIVE_EXPORT(DosRequestMutexSem, 334),
     LX_NATIVE_EXPORT(DosReleaseMutexSem, 335),
     LX_NATIVE_EXPORT(DosSubSetMem, 344),
@@ -2994,6 +2995,23 @@ static APIRET16 bridge16to32_DosSemSet(uint8 *args)
     LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PHSEM16, sem);
     return DosSemSet(sem);
 } // bridge16to32_DosSemSet
+
+
+APIRET DosCloseMutexSem(HMTX hmtx)
+{
+    TRACE_NATIVE("DosCloseMutexSem(%u)", (uint) hmtx);
+
+    if (hmtx) {
+        pthread_mutex_t *mutex = (pthread_mutex_t *) hmtx;
+        const int rc = pthread_mutex_destroy(mutex);
+        if (rc == 0)
+            return NO_ERROR;
+        else if (rc == EBUSY)
+            return ERROR_SEM_BUSY;
+    }
+
+    return ERROR_INVALID_HANDLE;
+} // DosCloseMutexSem
 
 // end of doscalls.c ...
 
