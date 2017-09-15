@@ -3004,11 +3004,13 @@ APIRET DosCloseMutexSem(HMTX hmtx)
     if (hmtx) {
         pthread_mutex_t *mutex = (pthread_mutex_t *) hmtx;
         const int rc = pthread_mutex_destroy(mutex);
-        if (rc == 0)
-            return NO_ERROR;
-        else if (rc == EBUSY)
+        if (rc == EBUSY) {
             return ERROR_SEM_BUSY;
-    }
+        } else if (rc == 0) {
+            free(mutex);
+            return NO_ERROR;
+        } // else if
+    } // if
 
     return ERROR_INVALID_HANDLE;
 } // DosCloseMutexSem
