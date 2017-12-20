@@ -19,7 +19,7 @@ typedef struct
 } KBDKEYINFO, *PKBDKEYINFO;
 #pragma pack(pop)
 
-APIRET16 OS2API16 KbdCharIn(PKBDKEYINFO pkbci, USHORT fWait, HKBD hkbd);
+OS2EXPORT APIRET16 OS2API16 KbdCharIn(PKBDKEYINFO pkbci, USHORT fWait, HKBD hkbd);
 
 #ifdef __cplusplus
 }

@@ -22,14 +22,14 @@ enum
     QUE_CONVERT_ADDRESS = 4
 };
 
-APIRET OS2API DosCreateQueue(PHQUEUE phq, ULONG priority, PSZ pszName);
-APIRET OS2API DosCloseQueue(HQUEUE hq);
-APIRET OS2API DosOpenQueue(PPID ppid, PHQUEUE phq, PSZ pszName);
-APIRET OS2API DosPeekQueue(HQUEUE hq, PREQUESTDATA pRequest, PULONG pcbData, PPVOID ppbuf, PULONG element, BOOL32 nowait, PBYTE ppriority, HEV hsem);
-APIRET OS2API DosPurgeQueue(HQUEUE hq);
-APIRET OS2API DosQueryQueue(HQUEUE hq, PULONG pcbEntries);
-APIRET OS2API DosReadQueue(HQUEUE hq, PREQUESTDATA pRequest, PULONG pcbData, PPVOID ppbuf, ULONG element, BOOL32 wait, PBYTE ppriority, HEV hsem);
-APIRET OS2API DosWriteQueue(HQUEUE hq, ULONG request, ULONG cbData, PVOID pbData, ULONG priority);
+OS2EXPORT APIRET OS2API DosCreateQueue(PHQUEUE phq, ULONG priority, PSZ pszName);
+OS2EXPORT APIRET OS2API DosCloseQueue(HQUEUE hq);
+OS2EXPORT APIRET OS2API DosOpenQueue(PPID ppid, PHQUEUE phq, PSZ pszName);
+OS2EXPORT APIRET OS2API DosPeekQueue(HQUEUE hq, PREQUESTDATA pRequest, PULONG pcbData, PPVOID ppbuf, PULONG element, BOOL32 nowait, PBYTE ppriority, HEV hsem);
+OS2EXPORT APIRET OS2API DosPurgeQueue(HQUEUE hq);
+OS2EXPORT APIRET OS2API DosQueryQueue(HQUEUE hq, PULONG pcbEntries);
+OS2EXPORT APIRET OS2API DosReadQueue(HQUEUE hq, PREQUESTDATA pRequest, PULONG pcbData, PPVOID ppbuf, ULONG element, BOOL32 wait, PBYTE ppriority, HEV hsem);
+OS2EXPORT APIRET OS2API DosWriteQueue(HQUEUE hq, ULONG request, ULONG cbData, PVOID pbData, ULONG priority);
 
 #ifdef __cplusplus
 }

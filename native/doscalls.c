@@ -28,13 +28,14 @@ enum
     QHINF_STE,
     QHINF_MAPSEL
 };
-APIRET OS2API DosQueryHeaderInfo(HMODULE hmod, ULONG ulIndex, PVOID pvBuffer, ULONG cbBuffer, ULONG ulSubFunction);
+
+OS2EXPORT APIRET OS2API DosQueryHeaderInfo(HMODULE hmod, ULONG ulIndex, PVOID pvBuffer, ULONG cbBuffer, ULONG ulSubFunction);
 
 // This is also undocumented (thanks, EDM/2!). Of course, Java uses it.
-APIRET OS2API DosQuerySysState(ULONG func, ULONG arg1, ULONG pid, ULONG _res_, PVOID buf, ULONG bufsz);
+OS2EXPORT APIRET OS2API DosQuerySysState(ULONG func, ULONG arg1, ULONG pid, ULONG _res_, PVOID buf, ULONG bufsz);
 
 // This is also undocumented (no idea about this at all, including function params). Of course, Java uses it.
-APIRET DosR3ExitAddr(void);
+OS2EXPORT APIRET DosR3ExitAddr(void);
 
 // These are 16-bit APIs that aren't in the 4.5 toolkit headers. Yeah, Java uses them! Winging it.
 typedef int HSEM16, *PHSEM16;
@@ -1940,7 +1941,7 @@ APIRET DosWaitChild(ULONG action, ULONG option, PRESULTCODES pres, PPID ppid, PI
     return NO_ERROR;
 } // DosWaitChild
 
-APIRET OS2API DosWaitThread(PTID ptid, ULONG option)
+APIRET DosWaitThread(PTID ptid, ULONG option)
 {
     TRACE_NATIVE("DosWaitThread(%p, %u)", ptid, (uint) option);
 
@@ -2006,7 +2007,7 @@ APIRET OS2API DosWaitThread(PTID ptid, ULONG option)
     return NO_ERROR;
 } // DosWaitThread
 
-APIRET OS2API DosSleep(ULONG msec)
+APIRET DosSleep(ULONG msec)
 {
     TRACE_NATIVE("DosSleep(%u)", (uint) msec);
 
@@ -2552,7 +2553,7 @@ static APIRET resetOneBuffer(const int fd)
 } // resetOneBuffer
 
 
-APIRET OS2API DosResetBuffer(HFILE hFile)
+APIRET DosResetBuffer(HFILE hFile)
 {
     TRACE_NATIVE("DosResetBuffer(%u)", (uint) hFile);
 
@@ -2807,7 +2808,7 @@ APIRET DosQueryHeaderInfo(HMODULE hmod, ULONG ulIndex, PVOID pvBuffer, ULONG cbB
     return ERROR_INVALID_PARAMETER;
 } // DosQueryHeaderInfo
 
-APIRET OS2API DosQueryExtLIBPATH(PSZ pszExtLIBPATH, ULONG flags)
+APIRET DosQueryExtLIBPATH(PSZ pszExtLIBPATH, ULONG flags)
 {
     TRACE_NATIVE("DosQueryExtLIBPATH('%s', %u)", pszExtLIBPATH, (uint) flags);
 

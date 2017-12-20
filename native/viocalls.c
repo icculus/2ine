@@ -407,7 +407,7 @@ static APIRET16 bridge16to32_VioSetCurPos(uint8 *args)
     return VioSetCurPos(usRow, usColumn, hvio);
 } // bridge16to32_VioSetCurPos
 
-APIRET16 OS2API16 VioSetCurType(PVIOCURSORINFO pvioCursorInfo, HVIO hvio)
+APIRET16 VioSetCurType(PVIOCURSORINFO pvioCursorInfo, HVIO hvio)
 {
     TRACE_NATIVE("VioSetCurType(%p, %u)", pvioCursorInfo, (uint) hvio);
     FIXME("write me");

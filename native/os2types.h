@@ -16,7 +16,7 @@ extern "C" {
 #endif
 
 #ifndef OS2API
-#define OS2API APIENTRY OS2EXPORT
+#define OS2API APIENTRY
 #endif
 
 // Note that we never export actual 16-bit APIs from these headers, even if
