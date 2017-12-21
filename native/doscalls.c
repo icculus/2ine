@@ -748,7 +748,7 @@ APIRET DosAllocMem(PPVOID ppb, ULONG cb, ULONG flag)
     TRACE_NATIVE("DosAllocMem(%p, %u, %u)", ppb, (uint) cb, (uint) flag);
 
     // !!! FIXME: this API is actually much more complicated than this.
-    *ppb = malloc(cb);
+    *ppb = calloc(1, cb);
     if (!*ppb)
         return ERROR_NOT_ENOUGH_MEMORY;
     return NO_ERROR;
