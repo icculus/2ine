@@ -37,6 +37,8 @@ typedef uint32_t APIRET;
 typedef uint16_t APIRET16;
 typedef uint32_t APIRET32;
 
+typedef uint32_t BOOL;
+
 typedef void VOID;
 typedef VOID *PVOID;
 typedef PVOID *PPVOID;
@@ -64,6 +66,7 @@ typedef HANDLE HDIR, *PHDIR;
 typedef HANDLE HEV, *PHEV;
 typedef HANDLE HMTX, *PHMTX;
 typedef HANDLE HQUEUE, *PHQUEUE;
+typedef HANDLE HPS, *PHPS;
 typedef HANDLE PID, *PPID;
 typedef HANDLE TID, *PTID;
 typedef SHANDLE HVIO, *PHVIO;

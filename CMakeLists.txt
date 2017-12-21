@@ -64,7 +64,7 @@ elseif(CURSES_HAVE_CURSES_H)
     add_definitions(-DHAVE_CURSES_H)
 endif()
 
-foreach(_I doscalls;msg;nls;quecalls;viocalls;kbdcalls;sesmgr)
+foreach(_I doscalls;msg;nls;quecalls;viocalls;kbdcalls;sesmgr;som;pmwin;pmshapi;pmgpi;tcpip32)
     add_library(${_I} SHARED "native/${_I}.c")
     set_target_properties(${_I} PROPERTIES COMPILE_FLAGS "-m32")
     set_target_properties(${_I} PROPERTIES LINK_FLAGS "-m32 -ggdb3")
