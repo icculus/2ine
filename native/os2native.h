@@ -2,7 +2,7 @@
 #define _INCL_OS2NATIVE_H_
 
 #define _POSIX_C_SOURCE 199309
-#define _BSD_SOURCE
+#define _DEFAULT_SOURCE
 #define _GNU_SOURCE
 #include <stdint.h>
 #include <stdlib.h>

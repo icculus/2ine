@@ -810,6 +810,8 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod, const int arg
             : "memory"
     );
 
+    (void) endLxProcess;  // make compiler happy.
+
     __builtin_unreachable();
 } // runLxModule
 
