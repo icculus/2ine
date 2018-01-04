@@ -66,19 +66,20 @@
 
 /* This is the original assembly code, for use with NASM.
 USE16  ; start in 16-bit code where our 16-bit caller lands.
-MOV BX, SS ; save off ss:sp
+MOV CX, SP  ; save off sp
+JMP DWORD 0x7788:0x33332222  ; jmp into the 32-bit code segment (the next instruction!).
+
+USE32
+MOV BX, SS ; save off ss
 SHL EBX, 16  ; scootch over!
-MOV BX, SP  ; save off ss:sp
+MOV BX, CX ; %ebx now has 16-bit ss:sp
 
 ; our stack is tiled, so we can easily find the linear address of it.
 MOV AX, SS  ; move the stack segment into the low word.
 SHR AX, 3  ; shift out the control bits from the segment.
 SHL EAX, 16  ; move the remaining selector bits to the high word of %eax
-MOV AX, SP  ; move the stack offset into the low word. Now %eax has the linear stack pointer.
+MOV AX, CX  ; move the stack offset into the low word. Now %eax has the linear stack pointer.
 
-JMP DWORD 0x7788:0x33332222  ; jmp into the 32-bit code segment (the next instruction!).
-
-USE32
 MOV CX, 0xABCD  ; original linear stack segment from lx_loader's main().
 MOV SS, CX
 MOV ESP, EAX  ; and the same stack pointer, but linear.
@@ -104,8 +105,8 @@ POP ES  ; get back caller's %es register.
 POP DS  ; get back our 16-bit data segment.
 
 ; Restore 16:16 stack.  !!! FIXME: can use LSS if we figure out prefix and DS politics.
-POP BX  ; Get our original ss back.
-POP CX  ; Get our original sp back.
+POP BX  ; Get our original sp back.
+POP CX  ; Get our original ss back.
 
 JMP WORD 0xAAAA:0xBBBB  ; back into 16-bit land (the next instruction!).
 
@@ -120,25 +121,8 @@ RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling
     \
     /* instructions are in Intel syntax here, not AT&T. */ \
     /* USE16 */ \
-    *(ptr++) = 0x8C;  /* mov bx,ss... */ \
-    *(ptr++) = 0xD3;  /*  ...mov bx,ss */ \
-    *(ptr++) = 0x66;  /* shl ebx,byte 0x10... */ \
-    *(ptr++) = 0xC1;  /*  ...shl ebx,byte 0x10 */ \
-    *(ptr++) = 0xE3;  /*  ...shl ebx,byte 0x10 */ \
-    *(ptr++) = 0x10;  /*  ...shl ebx,byte 0x10 */ \
-    *(ptr++) = 0x89;  /* mov bx,sp... */ \
-    *(ptr++) = 0xE3;  /*  ...mov bx,sp */ \
-    *(ptr++) = 0x8C;  /* mov ax,ss... */ \
-    *(ptr++) = 0xD0;  /*  ...mov ax,ss */ \
-    *(ptr++) = 0xC1;  /* shr ax,byte 0x3... */ \
-    *(ptr++) = 0xE8;  /*  ...shr ax,byte 0x3 */ \
-    *(ptr++) = 0x03;  /*  ...shr ax,byte 0x3 */ \
-    *(ptr++) = 0x66;  /* shl eax,byte 0x10... */ \
-    *(ptr++) = 0xC1;  /*  ...shl eax,byte 0x10 */ \
-    *(ptr++) = 0xE0;  /*  ...shl eax,byte 0x10 */ \
-    *(ptr++) = 0x10;  /*  ...shl eax,byte 0x10 */ \
-    *(ptr++) = 0x89;  /* mov ax,sp... */ \
-    *(ptr++) = 0xE0;  /*  ...mov ax,sp */ \
+    *(ptr++) = 0x89;  /* mov cx,sp... */ \
+    *(ptr++) = 0xE1;  /*  ...mov cx,sp */ \
     *(ptr++) = 0x66;  /* jmp dword 0x7788:0x33332222... */ \
     *(ptr++) = 0xEA;  /*  ...jmp dword 0x7788:0x33332222 */ \
     const uint32 jmp32addr = (uint32) (ptr + 6); \
@@ -146,6 +130,28 @@ RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling
     memcpy(ptr, &GLoaderState->original_cs, 2); ptr += 2; \
     \
     /* USE32 */ \
+    *(ptr++) = 0x66;  /* mov bx,ss... */ \
+    *(ptr++) = 0x8C;  /*  ...mov bx,ss */ \
+    *(ptr++) = 0xD3;  /*  ...mov bx,ss */ \
+    *(ptr++) = 0xC1;  /* shl ebx,byte 0x10... */ \
+    *(ptr++) = 0xE3;  /*  ...shl ebx,byte 0x10 */ \
+    *(ptr++) = 0x10;  /*  ...shl ebx,byte 0x10 */ \
+    *(ptr++) = 0x66;  /* mov bx,cx... */ \
+    *(ptr++) = 0x89;  /*  ...mov bx,cx */ \
+    *(ptr++) = 0xCB;  /*  ...mov bx,cx */ \
+    *(ptr++) = 0x66;  /* mov ax,ss... */ \
+    *(ptr++) = 0x8C;  /*  ...mov ax,ss */ \
+    *(ptr++) = 0xD0;  /*  ...mov ax,ss */ \
+    *(ptr++) = 0x66;  /* shr ax,byte 0x3... */ \
+    *(ptr++) = 0xC1;  /*  ...shr ax,byte 0x3 */ \
+    *(ptr++) = 0xE8;  /*  ...shr ax,byte 0x3 */ \
+    *(ptr++) = 0x03;  /*  ...shr ax,byte 0x3 */ \
+    *(ptr++) = 0xC1;  /* shl eax,byte 0x10... */ \
+    *(ptr++) = 0xE0;  /*  ...shl eax,byte 0x10 */ \
+    *(ptr++) = 0x10;  /*  ...shl eax,byte 0x10 */ \
+    *(ptr++) = 0x66;  /* mov ax,cx... */ \
+    *(ptr++) = 0x89;  /*  ...mov ax,cx */ \
+    *(ptr++) = 0xC8;  /*  ...mov ax,cx */ \
     *(ptr++) = 0x66;  /* mov cx,0xabcd... */ \
     *(ptr++) = 0xB9;  /*  ...mov cx,0xabcd */ \
     memcpy(ptr, &GLoaderState->original_ss, 2); ptr += 2; \
@@ -159,14 +165,18 @@ RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling
     *(ptr++) = 0x53;  /* push ebx */ \
     *(ptr++) = 0x1E;  /* push ds */ \
     *(ptr++) = 0x06;  /* push es */ \
-    *(ptr++) = 0x66;  /* mov cx,0x8888... */ \
-    *(ptr++) = 0xB9;  /*  ...mov cx,0x8888 */ \
-    memcpy(ptr, &GLoaderState->original_ds, 2); ptr += 2; \
+    if (GLoaderState->original_ss != GLoaderState->original_ds) { \
+        *(ptr++) = 0x66;  /* mov cx,0x8888... */ \
+        *(ptr++) = 0xB9;  /*  ...mov cx,0x8888 */ \
+        memcpy(ptr, &GLoaderState->original_ds, 2); ptr += 2; \
+    } \
     *(ptr++) = 0x8E;  /* mov ds,ecx... */ \
     *(ptr++) = 0xD9;  /*  ...mov ds,ecx */ \
-    *(ptr++) = 0x66;  /* mov cx,0x9999... */ \
-    *(ptr++) = 0xB9;  /*  ...mov cx,0x9999 */ \
-    memcpy(ptr, &GLoaderState->original_es, 2); ptr += 2; \
+    if (GLoaderState->original_ds != GLoaderState->original_es) { \
+        *(ptr++) = 0x66;  /* mov cx,0x9999... */ \
+        *(ptr++) = 0xB9;  /*  ...mov cx,0x9999 */ \
+        memcpy(ptr, &GLoaderState->original_es, 2); ptr += 2; \
+    } \
     *(ptr++) = 0x8E;  /* mov es,ecx... */ \
     *(ptr++) = 0xC1;  /*  ...mov es,ecx */ \
     *(ptr++) = 0x50;  /* push eax */ \
