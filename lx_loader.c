@@ -2098,6 +2098,7 @@ static __attribute__((noreturn)) void handleThreadLocalStorageAccess(const int s
 
 static void segfault_catcher(int sig, siginfo_t *info, void *ctx)
 {
+    ucontext_t *uctx = (ucontext_t *) ctx;
     const uint32 *addr = (const uint32 *) info->si_addr;
     const uint32 *tlspage = GLoaderState->tlspage;
 
@@ -2106,7 +2107,7 @@ static void segfault_catcher(int sig, siginfo_t *info, void *ctx)
         // was the app accessing one of the OS/2 TLS slots?
         const int slot = (int) (addr - tlspage);
         if (slot < 32)
-            handleThreadLocalStorageAccess(slot, (ucontext_t *) ctx);
+            handleThreadLocalStorageAccess(slot, uctx);
     } // if
 
     static int faults = 0;
