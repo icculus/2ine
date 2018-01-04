@@ -1313,6 +1313,51 @@ static int loadLxNameTable(LxModule *lxmod, const uint8 *name_table)
     return 1;
 } // loadLxNameTable
 
+
+// This is how I understand this mess, which I could be wrong about.
+// Apparently 32-bit ring-3 code on OS/2 uses code segment 0x5B, even though
+//  generally 32-bit apps don't think about their _segment_ because they have
+//  a linear address space. This is true on Linux, too, and the kernel
+//  hardcodes a segment for user-space code (0x23 at the moment, at least for
+//  x86-32 code running on an x86-64 kernel. It's a different hardcoded number
+//  on x86-32 kernels, too).
+// Code (from IBM!) exists in the wild that hardcodes references to the OS/2
+//  code segment, which means if the linear address space isn't on that
+//  segment, programs will crash if they explicitly reference it.
+// This is hard to map around on Linux because we can't meaningfully mess with
+//  the GDT in a flexible way.
+// In theory, the only place we should ever see a hardcoded reference to
+//  CS 0x5B is in a 16-bit thunk that is trying to jump back to 32-bit mode.
+//  16-bit code wouldn't otherwise reference it, being 16-bit, and 32-bit
+//  code wouldn't need to explicitly reference it.
+//  Even still, most tools (EMX, etc) don't do this. I couldn't find any
+//  mention that OS/2 guarantees this code segment will exist, just that it
+//  seems to map 32-bit apps there and it's probably normal since Linux uses
+//  roughly the same approach. If it had ever changed, it would definitely
+//  break some programs.
+// So we go through object pages that are marked as 16:16 and EXEC, and look
+//  for things that look like absolute jmps to code segment 0x5B, and patch
+//  them up to the host's actual linear address code segment. This is nasty,
+//  but oh well.
+static void fixupLinearCodeSegmentReferences(uint8 *addr, size_t size)
+{
+    // in lieu of writing a full x86 instruction decoder, we just look for
+    //  0xEA (JMP LARGE FAR PTR ADDR), skip 4 bytes (the 32-bit offset), and
+    //  see if the next two bytes are 0x5B 0x00 (the 16-bit segment). This is
+    //  wrong but "good enough" for now.
+    while (size >= 7) {
+        size--;
+        if (*(addr++) == 0xEA) {
+            if ((addr[4] == 0x5B) && (addr[5] == 0x00)) {
+                //printf("Patching out code segment 0x5B at %p\n", addr+4);
+                memcpy(&addr[4], &GLoaderState->original_cs, 2);
+                size -= 6;
+                addr += 6;
+            } // if
+        } // if
+    } // while
+} // fixupLinearCodeSegmentReferences
+
 // !!! FIXME: break up this function.
 static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int dependency_tree_depth)
 {
@@ -1531,6 +1576,10 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
                 goto loadlx_failed;
             } // if
             assert(offset == 0);
+
+            if (obj->object_flags & 0x4) {  // 16:16 segment with code.
+                fixupLinearCodeSegmentReferences((uint8 *) (size_t) retval->mmaps[i].mapped, retval->mmaps[i].size);
+            }
         } // for
     } // if
 
