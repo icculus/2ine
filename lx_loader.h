@@ -134,6 +134,7 @@ typedef struct LxMmaps
     void *mapped;
     void *addr;
     size_t size;
+    int prot;
     uint16 alias;  // 16:16 alias, if one.
 } LxMmaps;
 
@@ -226,7 +227,7 @@ typedef struct LxLoaderState
     void (*dosExit)(uint32 action, uint32 result);
     uint16 (*initOs2Tib)(uint8 *tibspace, void *_topOfStack, const size_t stacklen, const uint32 tid);
     void (*deinitOs2Tib)(const uint16 selector);
-    int (*findSelector)(const uint32 addr, uint16 *outselector, uint16 *outoffset);
+    int (*findSelector)(const uint32 addr, uint16 *outselector, uint16 *outoffset, int iscode);
     void (*freeSelector)(const uint16 selector);
     void *(*convert1616to32)(const uint32 addr1616);
     uint32 (*convert32to1616)(void *addr32);

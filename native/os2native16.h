@@ -51,7 +51,7 @@
     obj16.addr = mmapaddr; \
     \
     uint16 offset = 0; \
-    if (!GLoaderState->findSelector((uint32) obj16.addr, &obj16.alias, &offset)) { \
+    if (!GLoaderState->findSelector((uint32) obj16.addr, &obj16.alias, &offset, 1)) { \
         fprintf(stderr, "couldn't find a selector for 16-bit entry points!\n"); \
         munmap(obj16.mapped, vsize); \
         obj16.mapped = obj16.addr = NULL; \

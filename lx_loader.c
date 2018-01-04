@@ -342,7 +342,7 @@ static int decompressIterated(uint8 *dst, uint32 dstlen, const uint8 *src, uint3
 } // decompressIterated
 
 // !!! FIXME: mutex this
-static int allocateSelector(const uint16 selector, const uint32 addr, const unsigned int contents, const int is32bit)
+static int allocateSelector(const uint16 selector, const int pages, const uint32 addr, const unsigned int contents, const int is32bit)
 {
     assert(selector < (sizeof (GLoaderState->ldt) / sizeof (GLoaderState->ldt[0])));
 
@@ -354,7 +354,7 @@ static int allocateSelector(const uint16 selector, const uint32 addr, const unsi
     struct user_desc entry;
     entry.entry_number = (unsigned int) selector;
     entry.base_addr = (unsigned int) addr; //(expand_down ? (addr + 0x10000) : addr);
-    entry.limit = 16; //expand_down ? 0 : 16;
+    entry.limit = pages; //expand_down ? 0 : 16;
     entry.seg_32bit = is32bit;
     entry.contents = contents;
     entry.read_exec_only = 0;
@@ -369,7 +369,7 @@ static int allocateSelector(const uint16 selector, const uint32 addr, const unsi
 } // allocateSelector
 
 // !!! FIXME: mutex this
-static int findSelector(const uint32 _addr, uint16 *outselector, uint16 *outoffset)
+static int findSelector(const uint32 _addr, uint16 *outselector, uint16 *outoffset, int iscode)
 {
     uint32 addr = _addr;
     if (addr < 4096)
@@ -380,7 +380,7 @@ static int findSelector(const uint32 _addr, uint16 *outselector, uint16 *outoffs
     int available = -1;
     int preferred = -1;
 
-    // optimize for the case where we need a selector that happenes to be in tiled memory,
+    // optimize for the case where we need a selector that happens to be in tiled memory,
     //  since it's fast to look up.
     if (addr < (1024 * 1024 * 512)) {
         const uint16 idx = (uint16) (addr >> 16);
@@ -413,11 +413,31 @@ static int findSelector(const uint32 _addr, uint16 *outselector, uint16 *outoffs
         return 0;  // uh oh, out of selectors!
     } // if
 
+    // decide if there is code or data mapped here. If there's an OS/2 API to
+    //  change page permissions, we'll need to update the mapping and our state.
+    for (LxModule *lxmod = GLoaderState->loaded_modules; (iscode == -1) && lxmod; lxmod = lxmod->next) {
+        LxMmaps *mmaps = lxmod->mmaps;
+        for (uint32 i = 0; i < lxmod->lx.module_num_objects; i++, mmaps++) {
+            const size_t lo = (size_t) mmaps->addr;
+            const size_t hi = lo + mmaps->size;
+            if ((addr >= lo) && (addr <= hi)) {
+                iscode = ((mmaps->prot & PROT_EXEC) != 0);
+                break;
+            } // if
+        } // for
+    } // for
+
+    if (iscode == -1) {
+        iscode = 0;
+    }
+
     const uint32 diff = addr % 0x10000;
     addr -= diff;   // make sure we start on a 64k border.
 
     const uint16 selector = (uint16) (preferred != -1) ? preferred : available;
-    if (!allocateSelector(selector, addr, MODIFY_LDT_CONTENTS_CODE, 0)) {
+    //printf("setting up LDT mapping for %s at selector %u\n", iscode ? "code" : "data", (unsigned int) selector);
+
+    if (!allocateSelector(selector, 16, addr, iscode ? MODIFY_LDT_CONTENTS_CODE : MODIFY_LDT_CONTENTS_DATA, 0)) {
         fprintf(stderr, "Uhoh, we've failed to allocate LDT selector %u! Probably about to crash...\n", (uint) selector); fflush(stderr);
         return 0;
     } // if
@@ -466,7 +486,7 @@ static uint32 convert32to1616(void *addr32)
 
     uint16 selector = 0;
     uint16 offset = 0;
-    if (!findSelector((uint32) addr32, &selector, &offset)) {
+    if (!findSelector((uint32) addr32, &selector, &offset, -1)) {
         fprintf(stderr, "Uhoh, ran out of LDT entries?!\n");
         return 0;  // oh well, crash, probably.
     } // if
@@ -481,7 +501,7 @@ static uint32 convert32to1616(void *addr32)
 // EMX (and probably many other things) occasionally has to call a 16-bit
 //  system API, and assumes its stack is tiled in the LDT; it'll just shift
 //  the stack pointer and use it as a stack segment for the 16-bit call
-//  without calling DosFlatToSeg(). So we tile the main thread's stack and
+//  without calling DosFlatToSel(). So we tile the main thread's stack and
 //  pray that covers it. If we have to tile _every_ thread's stack, we can do
 //  that later.
 // !!! FIXME: if we do this for secondary thread stacks, we'll need to mutex this.
@@ -502,7 +522,7 @@ static void initOs2StackSegments(uint32 addr, uint32 stacklen, const int deinit)
         if (deinit) {
             freeSelector((uint16) (addr >> 16));
         } else {
-            if (!allocateSelector((uint16) (addr >> 16), addr, MODIFY_LDT_CONTENTS_DATA/*STACK*/, 0)) {
+            if (!allocateSelector((uint16) (addr >> 16), 16, addr, MODIFY_LDT_CONTENTS_DATA, 0)) {
                 FIXME("uhoh, couldn't set up an LDT entry for a stack segment! Might crash later!");
             } // if
         } // else
@@ -691,7 +711,7 @@ static void *generateMissingTrampoline16(const char *_module, const char *_entry
         pageused = 0;
         uint16 offset = 0xFFFF;
         selector = 0xFFFF;
-        findSelector((uint32) page, &selector, &offset);
+        findSelector((uint32) page, &selector, &offset, 1);
         assert(selector != 0xFFFF);
         assert(offset == 0);
     } // if
@@ -1505,7 +1525,8 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
             if ((obj->object_flags & 0x1000) == 0)
                 continue;  // Object doesn't need a 16:16 alias, skip it.
             uint16 offset = 0;
-            if (!findSelector((uint32) (size_t) retval->mmaps[i].addr, &retval->mmaps[i].alias, &offset)) {
+            const int iscode = (obj->object_flags & 0x4) ? 1 : 0;
+            if (!findSelector((uint32) (size_t) retval->mmaps[i].addr, &retval->mmaps[i].alias, &offset, iscode)) {
                 fprintf(stderr, "Ran out of LDT entries getting a 16:16 alias for '%s' object #%u!\n", modname, (uint) (i + 1));
                 goto loadlx_failed;
             } // if
@@ -1647,6 +1668,8 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
         const int prot = ((object_flags & 0x1) ? PROT_READ : 0) |
                          ((object_flags & 0x2) ? PROT_WRITE : 0) |
                          ((object_flags & 0x4) ? PROT_EXEC : 0);
+
+        retval->mmaps[i].prot = prot;
 
         if (mprotect(retval->mmaps[i].mapped, retval->mmaps[i].size, prot) == -1) {
             fprintf(stderr, "mprotect(%p, %u, %s%s%s, ANON|PRIVATE|FIXED, -1, 0) failed (%d): %s\n",
