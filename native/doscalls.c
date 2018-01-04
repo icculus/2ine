@@ -235,11 +235,13 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls()) return NULL; })
     LX_NATIVE_EXPORT(DosQueryCurrentDir, 274),
     LX_NATIVE_EXPORT(DosQueryCurrentDisk, 275),
     LX_NATIVE_EXPORT(DosQueryFHState, 276),
+    LX_NATIVE_EXPORT(DosQueryFSAttach, 277),
     LX_NATIVE_EXPORT(DosQueryFileInfo, 279),
     LX_NATIVE_EXPORT(DosWaitChild, 280),
     LX_NATIVE_EXPORT(DosRead, 281),
     LX_NATIVE_EXPORT(DosWrite, 282),
     LX_NATIVE_EXPORT(DosExecPgm, 283),
+    LX_NATIVE_EXPORT(DosSetProcessCp, 289),
     LX_NATIVE_EXPORT(DosQueryCp, 291),
     LX_NATIVE_EXPORT(DosExitList, 296),
     LX_NATIVE_EXPORT(DosAllocMem, 299),
@@ -267,6 +269,7 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls()) return NULL; })
     LX_NATIVE_EXPORT(DosSubFreeMem, 346),
     LX_NATIVE_EXPORT(DosQuerySysInfo, 348),
     LX_NATIVE_EXPORT(DosSetExceptionHandler, 354),
+    LX_NATIVE_EXPORT(DosUnsetExceptionHandler, 355),
     LX_NATIVE_EXPORT(DosQuerySysState, 368),
     LX_NATIVE_EXPORT(DosSetSignalExceptionFocus, 378),
     LX_NATIVE_EXPORT(DosEnterMustComplete, 380),
@@ -647,6 +650,13 @@ APIRET DosCreateMutexSem(PSZ name, PHMTX phmtx, ULONG attr, BOOL32 state)
 APIRET DosSetExceptionHandler(PEXCEPTIONREGISTRATIONRECORD rec)
 {
     TRACE_NATIVE("DosSetExceptionHandler(%p)", rec);
+    return NO_ERROR;
+} // DosSetExceptionHandler
+
+// !!! FIXME: this is obviously not correct.
+APIRET DosUnsetExceptionHandler(PEXCEPTIONREGISTRATIONRECORD rec)
+{
+    TRACE_NATIVE("DosUnsetExceptionHandler(%p)", rec);
     return NO_ERROR;
 } // DosSetExceptionHandler
 
@@ -3010,7 +3020,6 @@ static APIRET16 bridge16to32_DosSemSet(uint8 *args)
     return DosSemSet(sem);
 } // bridge16to32_DosSemSet
 
-
 APIRET DosCloseMutexSem(HMTX hmtx)
 {
     TRACE_NATIVE("DosCloseMutexSem(%u)", (uint) hmtx);
@@ -3028,6 +3037,22 @@ APIRET DosCloseMutexSem(HMTX hmtx)
 
     return ERROR_INVALID_HANDLE;
 } // DosCloseMutexSem
+
+APIRET DosSetProcessCp(ULONG cp)
+{
+    TRACE_NATIVE("DosSetProcessCp(%u)", (unsigned int) cp);
+    if (cp != 437) {  // United States
+        FIXME("non-US codepages unsupported at the moment");
+        return ERROR_INVALID_CODE_PAGE;
+    }
+    return NO_ERROR;
+} // DosSetProcessCp
+
+APIRET DosQueryFSAttach(PSZ pszDeviceName, ULONG ulOrdinal, ULONG ulFSAInfoLevel, PFSQBUFFER2 pfsqb, PULONG pcbBuffLength)
+{
+    TRACE_NATIVE("DosQueryFSAttach('%s', %u, %u, %p, %p)", pszDeviceName, (unsigned int) ulOrdinal, (unsigned int) ulFSAInfoLevel, pfsqb, pcbBuffLength);
+    return ERROR_INVALID_FUNCTION;
+} // DosQueryFSAttach
 
 // end of doscalls.c ...
 

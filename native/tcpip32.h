@@ -30,6 +30,33 @@ extern "C" {
 #define OS2_SOCK_STREAM     1
 #define OS2_SOCK_DGRAM      2
 
+#define OS2_SOL_SOCKET 0xffff
+
+#define OS2_SO_DEBUG        0x0001
+#define OS2_SO_ACCEPTCONN   0x0002
+#define OS2_SO_REUSEADDR    0x0004
+#define OS2_SO_KEEPALIVE    0x0008
+#define OS2_SO_DONTROUTE    0x0010
+#define OS2_SO_BROADCAST    0x0020
+#define OS2_SO_USELOOPBACK  0x0040
+#define OS2_SO_LINGER       0x0080
+#define OS2_SO_OOBINLINE    0x0100
+#define OS2_SO_L_BROADCAST  0x0200
+#define OS2_SO_RCV_SHUTDOWN 0x0400
+#define OS2_SO_SND_SHUTDOWN 0x0800
+#define OS2_SO_REUSEPORT    0x1000
+#define OS2_SO_TTCP         0x2000
+#define OS2_SO_SNDBUF       0x1001
+#define OS2_SO_RCVBUF       0x1002
+#define OS2_SO_SNDLOWAT     0x1003
+#define OS2_SO_RCVLOWAT     0x1004
+#define OS2_SO_SNDTIMEO     0x1005
+#define OS2_SO_RCVTIMEO     0x1006
+#define OS2_SO_ERROR        0x1007
+#define OS2_SO_TYPE         0x1008
+#define OS2_SO_OPTIONS      0x1010
+
+
 #pragma pack(push, 1)
 typedef struct OS2_sockaddr
 {
@@ -82,6 +109,12 @@ typedef struct OS2_timeval
     sint32 tv_sec;
     sint32 tv_usec;
 } OS2_timeval;
+
+typedef struct OS2_timezone
+{
+    sint32 tz_minuteswest;
+    sint32 tz_dsttime;
+} OS2_timezone;
 #pragma pack(pop)
 
 OS2EXPORT int OS2API OS2_sock_init(void);
@@ -99,6 +132,17 @@ OS2EXPORT char * OS2API OS2_inet_ntoa(OS2_in_addr os2inaddr);
 OS2EXPORT OS2_servent * OS2API OS2_getservbyname(const char *name, const char *proto);
 OS2EXPORT int OS2API OS2_select(int sock, OS2_fd_set *readfds, OS2_fd_set *writefds, OS2_fd_set *errorfds, OS2_timeval *timeout);
 OS2EXPORT int OS2API OS2_os2_select(int *socks, int noreads, int nowrites, int noexcept, long timeout);
+OS2EXPORT int OS2API OS2_getsockname(int sock, OS2_sockaddr *os2name, int *namelen);
+OS2EXPORT int OS2API OS2_setsockopt(int sock, int os2level, int os2name, const void *value, int len);
+OS2EXPORT int OS2API OS2_bind(int sock, const OS2_sockaddr *os2name, int os2namelen);
+OS2EXPORT int OS2API OS2_accept(int sock, OS2_sockaddr *os2name, int *os2namelen);
+OS2EXPORT int OS2API OS2_Rgetsockname(int sock, OS2_sockaddr *os2name, int *namelen);
+OS2EXPORT int OS2API OS2_Rbind(int sock, OS2_sockaddr *os2name, int os2namelen, OS2_sockaddr *os2remote);
+OS2EXPORT int OS2API OS2_Raccept(int sock, OS2_sockaddr *os2name, int *os2namelen);
+OS2EXPORT int OS2API OS2_Rconnect(int sock, const OS2_sockaddr *os2name, int os2namelen);
+OS2EXPORT int OS2API OS2_Rlisten(int sock, int backlog);
+OS2EXPORT OS2_hostent * OS2API OS2_Rgethostbyname(const char *name);
+OS2EXPORT int OS2API OS2_gettimeofday(OS2_timeval *os2tv, OS2_timezone *os2tz);
 
 #ifdef __cplusplus
 }
