@@ -202,8 +202,14 @@ typedef struct LxPIB
 
 #pragma pack(pop)
 
-// We put the 128 bytes of TLS slots after the TIB structs.
-#define LXTIBSIZE (sizeof (LxTIB) + sizeof (LxTIB2) + 128)
+// We put the 128 bytes of TLS slots (etc) after the TIB structs.
+typedef struct LxPostTIB
+{
+    uint32 tls[32];
+    void *anchor_block;
+} LxPostTIB;
+
+#define LXTIBSIZE (sizeof (LxTIB) + sizeof (LxTIB2) + sizeof (LxPostTIB))
 
 typedef struct LxLoaderState
 {
@@ -214,6 +220,7 @@ typedef struct LxLoaderState
     int subprocess;
     int running;
     int trace_native;
+    int trace_events;
     uint16 original_cs;
     uint16 original_ds;
     uint16 original_es;

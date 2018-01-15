@@ -64,6 +64,9 @@ elseif(CURSES_HAVE_CURSES_H)
     add_definitions(-DHAVE_CURSES_H)
 endif()
 
+# !!! FIXME
+include_directories("/usr/local/include/SDL2")
+
 foreach(_I doscalls;msg;nls;quecalls;viocalls;kbdcalls;sesmgr;som;pmwin;pmshapi;pmgpi;tcpip32)
     add_library(${_I} SHARED "native/${_I}.c")
     set_target_properties(${_I} PROPERTIES COMPILE_FLAGS "-m32")
@@ -73,6 +76,7 @@ endforeach()
 target_link_libraries(doscalls "pthread")
 # FIXME target_link_libraries(viocalls ${CURSES_LIBRARIES})
 target_link_libraries(viocalls ncursesw)
+target_link_libraries(pmwin "${CMAKE_CURRENT_SOURCE_DIR}/libSDL2-2.0.so.0")
 
 add_executable(lx_dump lx_dump.c)
 

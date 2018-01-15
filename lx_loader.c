@@ -2046,7 +2046,10 @@ static __attribute__((noreturn)) void handleThreadLocalStorageAccess(const int s
             : "=a" (ptib2)
             : "eax" (gregs[REG_FS])
     );
-    uint32 *tls = (uint32 *) (ptib2 + 1);  // The thread's TLS data is stored right after its TIB2 struct.
+
+    // The thread's TLS data is stored in LxPostTIB, right after its TIB2 struct.
+    LxPostTIB *posttib = (LxPostTIB *) (ptib2 + 1);
+    uint32 *tls = posttib->tls;
     tls += slot;
 
     //printf("We wanted to access thread %p TLS slot %d (currently holds %u)\n", tls - slot, slot, (uint) *tls);
@@ -2150,6 +2153,9 @@ int main(int argc, char **argv, char **envp)
 
     if (getenv("TRACE_NATIVE"))
         GLoaderState->trace_native = 1;
+
+    if (getenv("TRACE_EVENTS"))
+        GLoaderState->trace_events = 1;
 
     unsigned int segment = 0;
     __asm__ __volatile__ ( "movw %%cs, %%ax  \n\t" : "=a" (segment) );

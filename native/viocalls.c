@@ -1,6 +1,10 @@
 #include "os2native16.h"
 #include "viocalls.h"
 
+// os2types.h defines these, but so does curses.
+#undef TRUE
+#undef FALSE
+
 #include <unistd.h>
 #include <ctype.h>
 

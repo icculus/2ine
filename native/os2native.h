@@ -25,6 +25,12 @@ static LxLoaderState *GLoaderState = NULL;
 #define TRACE_NATIVE(...) do {} while (0)
 #endif
 
+#if 1
+#define TRACE_EVENT(...) do { if (GLoaderState->trace_events) { fprintf(stderr, "2INE TRACE [%lu]: ", (unsigned long) pthread_self()); fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n"); } } while (0)
+#else
+#define TRACE_EVENT(...) do {} while (0)
+#endif
+
 OS2EXPORT const LxExport * lxNativeModuleInit(LxLoaderState *lx_state, uint32 *lx_num_exports);
 void OS2EXPORT lxNativeModuleDeinit(void);
 

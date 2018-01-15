@@ -57,6 +57,7 @@ typedef uint8_t BYTE, *PBYTE;
 // !!! FIXME:  refactor and mutex a bunch of stuff...if it has to be a 32-bit
 // !!! FIXME:  int, it needs to be an index into a resizable array, but at the
 // !!! FIXME:  native word size, these handles can just be pointers cast to ints.
+// !!! FIXME:  alternately: guarantee all handles are in the bottom 4 gigabytes?
 typedef uint16_t SHANDLE, *PSHANDLE;
 typedef uint32_t LHANDLE, *PLHANDLE;
 typedef LHANDLE HANDLE, *PHANDLE;
@@ -71,10 +72,17 @@ typedef HANDLE PID, *PPID;
 typedef HANDLE TID, *PTID;
 typedef SHANDLE HVIO, *PHVIO;
 typedef SHANDLE HKBD, *PHKBD;
+
 typedef PCHAR PSZ;
 typedef PCHAR PCH;
 
 typedef int (APIENTRY *PFN)(void);
+
+typedef ULONG ERRORID;
+
+#define NULLHANDLE 0
+#define TRUE 1
+#define FALSE 0
 
 #ifdef __cplusplus
 }
