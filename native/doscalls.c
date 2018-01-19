@@ -1428,6 +1428,8 @@ APIRET DosCreateThread(PTID ptid, PFNTHREAD pfn, ULONG param, ULONG flag, ULONG 
     if ((stacksize % 4096) != 0)
         stacksize += 4096 - (cbStack % 4096);
 
+    stacksize += 4096;  // leave a page for the TIB and host system libs that use more stack.
+
     thread->stacklen = stacksize;
     thread->fn = pfn;
     thread->fnarg = param;
