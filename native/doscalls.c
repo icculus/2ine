@@ -102,6 +102,7 @@ typedef struct Thread
     size_t stacklen;
     PFNTHREAD fn;
     ULONG fnarg;
+    uint16 selector;
     struct Thread *prev;
     struct Thread *next;
 } Thread;
@@ -341,8 +342,9 @@ VOID DosExit(ULONG action, ULONG exitcode)
 
     // !!! FIXME: what does a value other than 0 or 1 do here?
     if (action == EXIT_THREAD) {
-        // !!! FIXME: terminate thread. If last thread: terminate process.
-        FIXME("DosExit(0) should terminate thread, not process");
+        // !!! FIXME: If last thread: terminate process.
+        FIXME("if last thread, treat as DosExit(1)");  // right now it will terminate process like exit(0), without running the exit list or reporting exitcode.
+        pthread_exit(NULL);  // DosWaitThread doesn't report exit codes.
     } // if
 
     // terminate the process.
@@ -1230,19 +1232,24 @@ APIRET DosQueryFileInfo(HFILE hf, ULONG ulInfoLevel, PVOID pInfo, ULONG cbInfoBu
     return ERROR_INVALID_LEVEL;
 } // DosQueryFileInfo
 
-
-static void os2ThreadEntry2(uint8 *tibspace, Thread *thread)
+static void os2ThreadCleanup(void *arg)
 {
-    void *esp = NULL;  // close enough.
-    const uint16 selector = GLoaderState->initOs2Tib(tibspace, &esp, thread->stacklen, (TID) thread);
-    thread->fn(thread->fnarg);
-    GLoaderState->deinitOs2Tib(selector);
-
+    Thread *thread = (Thread *) arg;
+    GLoaderState->deinitOs2Tib(thread->selector);
     grabLock(&GMutexDosCalls);
     thread->prev = NULL;
     thread->next = GDeadThreads;
     GDeadThreads = thread;
     ungrabLock(&GMutexDosCalls);
+} // os2ThreadCleanup
+
+static void os2ThreadEntry2(uint8 *tibspace, Thread *thread)
+{
+    void *esp = NULL;  // close enough.
+    thread->selector = GLoaderState->initOs2Tib(tibspace, &esp, thread->stacklen, (TID) thread);
+    pthread_cleanup_push(os2ThreadCleanup, thread);
+    thread->fn(thread->fnarg);
+    pthread_cleanup_pop(1);
 } // os2ThreadEntry2
 
 static void *os2ThreadEntry(void *arg)
