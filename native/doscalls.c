@@ -2926,7 +2926,7 @@ LX_NATIVE_MODULE_DEINIT({
     } // for
 
     for (uint32 i = 0; i < MaxHFiles; i++) {
-        if (HFiles[i].fd != -1)
+        if (HFiles[i].fd > 2)  // don't close -1, or any stdio handles.
             close(HFiles[i].fd);
     } // for
     free(HFiles);
