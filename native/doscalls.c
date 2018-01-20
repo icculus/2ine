@@ -366,7 +366,7 @@ APIRET DosExitList(ULONG ordercode, PFNEXITLIST fn)
     ExitListItem *item = NULL;
 
     // !!! FIXME: docs say this is illegal, but have to check what OS/2 actually does here.
-    if ((cmd != 1) && (arg != 0))
+    if ((cmd != EXLST_ADD) && (arg != 0))
         return ERROR_INVALID_DATA;
 
     switch (cmd) {
@@ -2400,7 +2400,7 @@ APIRET DosLoadModule(PSZ pszName, ULONG cbName, PSZ pszModname, PHMODULE phmod)
     FIXME("improve this");
     *pszName = 0;
 
-    // !!! FIXME: there's no mutex on this global state at the moment!
+    FIXME("there's no mutex on this global state at the moment!");
     LxModule *lxmod = GLoaderState->loadModule(pszModname);
     if (!lxmod)
         return ERROR_BAD_FORMAT;
