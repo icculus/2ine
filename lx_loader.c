@@ -599,16 +599,20 @@ static void freeLxModule(LxModule *lxmod);
 
 static __attribute__((noreturn)) void terminate(const uint32 exitcode)
 {
+    // free the actual .exe
     freeLxModule(GLoaderState->main_module);
 
     // clear out anything that is still loaded...
+    // presumably everything in the loaded_modules list is sorted in order
+    //  of dependency, since we prepend the newest loads to the front of the
+    //  list, and anything a load depends on gets listed before the dependent
+    //  module, pushing it futher down.
+    // if this doesn't work out, maybe just run everything's termination code
+    //  and free everything after there's nothing left to run.
     while (GLoaderState->loaded_modules) {
-        LxModule *lowest_mod = GLoaderState->loaded_modules;
-        for (LxModule *i = GLoaderState->loaded_modules; i; i = i->next) {
-            if (i->refcount < lowest_mod->refcount)
-                lowest_mod = i;
-        } // for
-        freeLxModule(lowest_mod);
+        LxModule *lxmod = GLoaderState->loaded_modules;
+        lxmod->refcount = 1;  // force it to free now.
+        freeLxModule(lxmod);
     } // while
 
     // OS/2's docs say this only keeps the lower 16 bits of exitcode.
@@ -913,6 +917,8 @@ static void freeLxModule(LxModule *lxmod)
     if (!lxmod)
         return;
 
+    //printf("freeing %s module '%s' (starting refcount=%d) ...\n", lxmod->nativelib ? "native" : "LX", lxmod->name, (int) lxmod->refcount); fflush(stdout);
+
     // !!! FIXME: mutex from here
     lxmod->refcount--;
     //fprintf(stderr, "unref'd module '%s' to %u\n", lxmod->name, (uint) lxmod->refcount);
@@ -967,6 +973,7 @@ static void freeLxModule(LxModule *lxmod)
         free((void *) lxmod->exports);
     } // else
 
+    //printf("Freed module '%s'\n", lxmod->name); fflush(stdout);
     free(lxmod);
 } // freeLxModule
 
@@ -1361,6 +1368,7 @@ static void fixupLinearCodeSegmentReferences(uint8 *addr, size_t size)
 // !!! FIXME: break up this function.
 static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int dependency_tree_depth)
 {
+    //printf("loadLxModule('%s')\n", fname); fflush(stdout);
     LxModule *retval = NULL;
     const uint8 *origexe = exe;
     //const uint32 origexelen = exelen;
