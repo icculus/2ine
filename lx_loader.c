@@ -2018,9 +2018,16 @@ static LxModule *loadLxModuleByModuleName(const char *modname)
 static LxModule *loadLxModuleByPathOrModuleName(const char *modname)
 {
     LxModule *retval = NULL;
-    // !!! FIXME: can a module name be specified as "NAME.DLL" and not be considered a filename?
-    if (strrchr(modname, '.') == NULL) {
-        retval = loadLxModuleByModuleName(modname);
+    if (!strchr(modname, '/') && !strchr(modname, '\\')) {
+        char *str = (char *) alloca(strlen(modname) + 1);
+        if (str) {
+            strcpy(str, modname);
+            char *ptr = strrchr(str, '.');
+            if (ptr) {
+                *ptr = '\0';
+            }
+            retval = loadLxModuleByModuleName(str);
+        } // if
     } else {
         uint32 err = 0;
         char *path = makeUnixPath(modname, &err);
