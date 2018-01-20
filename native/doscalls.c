@@ -2907,6 +2907,19 @@ APIRET DosQueryFSAttach(PSZ pszDeviceName, ULONG ulOrdinal, ULONG ulFSAInfoLevel
     return ERROR_INVALID_FUNCTION;
 } // DosQueryFSAttach
 
+APIRET DosSetFileSize(HFILE h, ULONG len)
+{
+    TRACE_NATIVE("DosSetFileSize(%u, %u)", (unsigned int) h, (unsigned int) len);
+    const int fd = getHFileUnixDescriptor(h);
+    if (fd == -1)
+        return ERROR_INVALID_HANDLE;
+
+    if (ftruncate(fd, len) == -1) {
+        FIXME("Set a better error based on errno");
+        return ERROR_DISK_FULL;
+    }
+    return NO_ERROR;
+} // DosSetFileSize
 
 
 LX_NATIVE_MODULE_16BIT_SUPPORT()
@@ -3011,6 +3024,7 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls()) return NULL; })
     LX_NATIVE_EXPORT(DosFindClose, 263),
     LX_NATIVE_EXPORT(DosFindFirst, 264),
     LX_NATIVE_EXPORT(DosFindNext, 265),
+    LX_NATIVE_EXPORT(DosSetFileSize, 272),
     LX_NATIVE_EXPORT(DosOpen, 273),
     LX_NATIVE_EXPORT(DosQueryCurrentDir, 274),
     LX_NATIVE_EXPORT(DosQueryCurrentDisk, 275),

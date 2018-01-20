@@ -461,6 +461,7 @@ OS2EXPORT ULONG OS2API DosSelToFlat(VOID);
 OS2EXPORT APIRET OS2API DosCloseMutexSem(HMTX hmtx);
 OS2EXPORT APIRET OS2API DosSetProcessCp(ULONG cp);
 OS2EXPORT APIRET OS2API DosQueryFSAttach(PSZ pszDeviceName, ULONG ulOrdinal, ULONG ulFSAInfoLevel, PFSQBUFFER2 pfsqb, PULONG pcbBuffLength);
+OS2EXPORT APIRET OS2API DosSetFileSize(HFILE hFile, ULONG cbSize);
 
 #ifdef __cplusplus
 }
