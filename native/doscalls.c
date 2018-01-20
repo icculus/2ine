@@ -332,7 +332,9 @@ static void runDosExitList(const uint32 why)
         next = item->next;
         GExitList = next;
         free(item);
+        //printf("calling dosexitlist item %p\n", fn); fflush(stdout);
         fn(why);
+        //printf("dosexitlist item %p returned!\n", fn); fflush(stdout);
     } // for
 } // runDosExitList
 
