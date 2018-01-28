@@ -4,7 +4,7 @@ It's a program that loads and runs OS/2 .exe files on Linux.
 
 Does it work?
 
-Barely. It runs exactly one simple Hello World program right now.
+Barely. It runs some command line OS/2 apps.
 
 Why?
 
