@@ -3062,6 +3062,7 @@ LX_NATIVE_MODULE_INIT({ if (!initDoscalls()) return NULL; })
     LX_NATIVE_EXPORT(DosSubAllocMem, 345),
     LX_NATIVE_EXPORT(DosSubFreeMem, 346),
     LX_NATIVE_EXPORT(DosQuerySysInfo, 348),
+    LX_NATIVE_EXPORT(DosWaitThread, 349),
     LX_NATIVE_EXPORT(DosSetExceptionHandler, 354),
     LX_NATIVE_EXPORT(DosUnsetExceptionHandler, 355),
     LX_NATIVE_EXPORT(DosQuerySysState, 368),
