@@ -1,3 +1,11 @@
+/**
+ * 2ine; an OS/2 emulator for Linux.
+ *
+ * Please see the file LICENSE.txt in the source's root directory.
+ *
+ *  This file written by Ryan C. Gordon.
+ */
+
 #define _GNU_SOURCE 1
 
 #include <stdio.h>

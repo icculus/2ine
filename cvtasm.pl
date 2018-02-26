@@ -1,4 +1,11 @@
 #!/usr/bin/perl -w
+#
+# 2ine; an OS/2 emulator for Linux.
+#
+# Please see the file LICENSE.txt in the source's root directory.
+#
+#  This file written by Ryan C. Gordon.
+
 
 # run this on the output from ndisasm.
 
