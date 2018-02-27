@@ -10,6 +10,7 @@
 #define _INCL_TCPIP32_H_
 
 #include "os2types.h"
+#include <stdio.h>  // !!! FIXME: don't use size_t in here.
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,21 +69,21 @@ extern "C" {
 #pragma pack(push, 1)
 typedef struct OS2_sockaddr
 {
-    uint8 sa_len;
-    uint8 sa_family;
+    uint8_t sa_len;
+    uint8_t sa_family;
     char sa_data[14];
 } OS2_sockaddr;
 
 typedef struct OS2_in_addr
 {
-    uint32 s_addr;
+    uint32_t s_addr;
 } OS2_in_addr;
 
 typedef struct OS2_sockaddr_in
 {
-    uint8 sin_len;
-    uint8 sin_family;
-    uint16 sin_port;
+    uint8_t sin_len;
+    uint8_t sin_family;
+    uint16_t sin_port;
     struct OS2_in_addr sin_addr;
     char sin_zero[8];
 } OS2_sockaddr_in;
@@ -107,21 +108,21 @@ typedef struct OS2_servent
 #define OS2_FD_SETSIZE 64
 typedef struct OS2_fd_set
 {
-    uint16 fd_count;
-    uint16 padding;
+    uint16_t fd_count;
+    uint16_t padding;
     int fd_array[OS2_FD_SETSIZE];
 } OS2_fd_set;
 
 typedef struct OS2_timeval
 {
-    sint32 tv_sec;
-    sint32 tv_usec;
+    int32_t tv_sec;
+    int32_t tv_usec;
 } OS2_timeval;
 
 typedef struct OS2_timezone
 {
-    sint32 tz_minuteswest;
-    sint32 tz_dsttime;
+    int32_t tz_minuteswest;
+    int32_t tz_dsttime;
 } OS2_timezone;
 #pragma pack(pop)
 
