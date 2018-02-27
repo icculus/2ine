@@ -9,6 +9,8 @@
 #include "os2native.h"
 #include "nls.h"
 
+#include "nls-lx.h"
+
 APIRET DosQueryDBCSEnv(ULONG buflen, PCOUNTRYCODE pcc, PCHAR buf)
 {
     // !!! FIXME: implement this for real.
@@ -73,12 +75,6 @@ APIRET DosQueryCtryInfo(ULONG cb, PCOUNTRYCODE pcc, PCOUNTRYINFO pci, PULONG pcb
 
     return NO_ERROR;
 } // DosQueryCtryInfo
-
-LX_NATIVE_MODULE_INIT()
-    LX_NATIVE_EXPORT(DosQueryDBCSEnv, 6),
-    LX_NATIVE_EXPORT(DosQueryCtryInfo, 5),
-    LX_NATIVE_EXPORT(DosMapCase, 7)
-LX_NATIVE_MODULE_INIT_END()
 
 // end of nls.c ...
 

@@ -9,6 +9,8 @@
 #include "os2native.h"
 #include "quecalls.h"
 
+#include "quecalls-lx.h"
+
 
 APIRET DosCreateQueue(PHQUEUE phq, ULONG priority, PSZ pszName)
 {
@@ -65,18 +67,6 @@ APIRET DosWriteQueue(HQUEUE hq, ULONG request, ULONG cbData, PVOID pbData, ULONG
     FIXME("write me");
     return ERROR_QUE_INVALID_HANDLE;
 } // DosWriteQueue
-
-
-LX_NATIVE_MODULE_INIT()
-    LX_NATIVE_EXPORT(DosReadQueue, 9),
-    LX_NATIVE_EXPORT(DosPurgeQueue, 10),
-    LX_NATIVE_EXPORT(DosCloseQueue, 11),
-    LX_NATIVE_EXPORT(DosQueryQueue, 12),
-    LX_NATIVE_EXPORT(DosPeekQueue, 13),
-    LX_NATIVE_EXPORT(DosWriteQueue, 14),
-    LX_NATIVE_EXPORT(DosOpenQueue, 15),
-    LX_NATIVE_EXPORT(DosCreateQueue, 16)
-LX_NATIVE_MODULE_INIT_END()
 
 // end of quecalls.c ...
 

@@ -9,9 +9,7 @@
 #include "os2native.h"
 #include "sesmgr.h"
 
-LX_NATIVE_MODULE_INIT()
-    LX_NATIVE_EXPORT(DosStartSession, 37)
-LX_NATIVE_MODULE_INIT_END()
+#include "sesmgr-lx.h"
 
 APIRET DosStartSession(PSTARTDATA psd, PULONG pidSession, PPID ppid)
 {

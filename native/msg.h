@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-OS2EXPORT APIRET OS2API DosPutMessage(HFILE hfile, ULONG cbMsg, PCHAR pBuf);
+OS2EXPORT APIRET OS2API DosPutMessage(HFILE hfile, ULONG cbMsg, PCHAR pBuf) OS2APIINFO(5);
 
 #ifdef __cplusplus
 }

@@ -22,40 +22,7 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 
-// DosQueryHeaderInfo() is an undocumented OS/2 API that is exported from DOSCALLS. Java uses it.
-//  This isn't mentioned in the docs or the SDK (beyond the ordinal being listed). I got the basic details
-//  from Odin32, which lists it in their os2newapi.h header.
-enum
-{
-    QHINF_EXEINFO = 1,
-    QHINF_READRSRCTBL,
-    QHINF_READFILE,
-    QHINF_LIBPATHLENGTH,
-    QHINF_LIBPATH,
-    QHINF_FIXENTRY,
-    QHINF_STE,
-    QHINF_MAPSEL
-};
-
-OS2EXPORT APIRET OS2API DosQueryHeaderInfo(HMODULE hmod, ULONG ulIndex, PVOID pvBuffer, ULONG cbBuffer, ULONG ulSubFunction);
-
-// This is also undocumented (thanks, EDM/2!). Of course, Java uses it.
-OS2EXPORT APIRET OS2API DosQuerySysState(ULONG func, ULONG arg1, ULONG pid, ULONG _res_, PVOID buf, ULONG bufsz);
-
-// This is also undocumented (no idea about this at all, including function params). Of course, Java uses it.
-OS2EXPORT APIRET DosR3ExitAddr(void);
-
-// These are 16-bit APIs that aren't in the 4.5 toolkit headers. Yeah, Java uses them! Winging it.
-typedef int HSEM16, *PHSEM16;
-static APIRET16 DosSemRequest(PHSEM16 sem, LONG ms);
-static APIRET16 DosSemClear(PHSEM16 sem);
-static APIRET16 DosSemWait(PHSEM16 sem, LONG ms);
-static APIRET16 DosSemSet(PHSEM16 sem);
-static APIRET16 bridge16to32_DosSemRequest(uint8 *args);
-static APIRET16 bridge16to32_DosSemClear(uint8 *args);
-static APIRET16 bridge16to32_DosSemWait(uint8 *args);
-static APIRET16 bridge16to32_DosSemSet(uint8 *args);
-
+#include "doscalls-lx.h"
 
 static pthread_mutex_t GMutexDosCalls;
 
@@ -2783,7 +2750,7 @@ static inline int trySpinLock(int *lock)
     return (__sync_lock_test_and_set(lock, 1) == 0);
 } // trySpinLock
 
-static APIRET16 DosSemRequest(PHSEM16 sem, LONG ms)
+APIRET16 DosSemRequest(PHSEM16 sem, LONG ms)
 {
     TRACE_NATIVE("DosSemRequest(%p, %u)", sem, (uint) ms);
     if (ms == 0) {
@@ -2812,14 +2779,14 @@ static APIRET16 DosSemRequest(PHSEM16 sem, LONG ms)
     return NO_ERROR;
 } // DosSemRequest
 
-static APIRET16 DosSemClear(PHSEM16 sem)
+APIRET16 DosSemClear(PHSEM16 sem)
 {
     TRACE_NATIVE("DosSemClear(%p)", sem);
     __sync_lock_release(sem);
     return NO_ERROR;
 } // DosSemClear
 
-static APIRET16 DosSemWait(PHSEM16 sem, LONG ms)
+APIRET16 DosSemWait(PHSEM16 sem, LONG ms)
 {
     TRACE_NATIVE("DosSemWait(%p, %u)", sem, (uint) ms);
     if (ms == 0) {
@@ -2848,38 +2815,12 @@ static APIRET16 DosSemWait(PHSEM16 sem, LONG ms)
     return NO_ERROR;
 } // DosSemWait
 
-static APIRET16 DosSemSet(PHSEM16 sem)
+APIRET16 DosSemSet(PHSEM16 sem)
 {
     TRACE_NATIVE("DosSemSet(%p)", sem);
     __sync_bool_compare_and_swap(sem, 1, 0);
     return NO_ERROR;
 } // DosSemSet
-
-static APIRET16 bridge16to32_DosSemRequest(uint8 *args)
-{
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(LONG, ms);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PHSEM16, sem);
-    return DosSemRequest(sem, ms);
-} // bridge16to32_DosSemRequest
-
-static APIRET16 bridge16to32_DosSemClear(uint8 *args)
-{
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PHSEM16, sem);
-    return DosSemClear(sem);
-} // bridge16to32_DosSemClear
-
-static APIRET16 bridge16to32_DosSemWait(uint8 *args)
-{
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(LONG, ms);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PHSEM16, sem);
-    return DosSemWait(sem, ms);
-} // bridge16to32_DosSemWait
-
-static APIRET16 bridge16to32_DosSemSet(uint8 *args)
-{
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PHSEM16, sem);
-    return DosSemSet(sem);
-} // bridge16to32_DosSemSet
 
 APIRET DosCloseMutexSem(HMTX hmtx)
 {
@@ -2930,58 +2871,23 @@ APIRET DosSetFileSize(HFILE h, ULONG len)
 } // DosSetFileSize
 
 
-LX_NATIVE_MODULE_16BIT_SUPPORT()
-    LX_NATIVE_MODULE_16BIT_API(DosSemRequest)
-    LX_NATIVE_MODULE_16BIT_API(DosSemClear)
-    LX_NATIVE_MODULE_16BIT_API(DosSemWait)
-    LX_NATIVE_MODULE_16BIT_API(DosSemSet)
-LX_NATIVE_MODULE_16BIT_SUPPORT_END()
-
-LX_NATIVE_MODULE_DEINIT({
-    GLoaderState->dosExit = NULL;
-
-    ExitListItem *next = GExitList;
-    GExitList = NULL;
-
-    for (ExitListItem *item = next; item; item = next) {
-        next = item->next;
-        free(item);
-    } // for
-
-    for (uint32 i = 0; i < MaxHFiles; i++) {
-        if (HFiles[i].fd > 2)  // don't close -1, or any stdio handles.
-            close(HFiles[i].fd);
-    } // for
-    free(HFiles);
-    HFiles = NULL;
-    MaxHFiles = 0;
-
-    pthread_mutex_destroy(&GMutexDosCalls);
-
-    LX_NATIVE_MODULE_DEINIT_16BIT_SUPPORT();
-})
-
-static int initDoscalls(void)
+LX_NATIVE_CONSTRUCTOR(doscalls)
 {
-    LX_NATIVE_MODULE_INIT_16BIT_SUPPORT()
-        LX_NATIVE_INIT_16BIT_BRIDGE(DosSemRequest, 8)
-        LX_NATIVE_INIT_16BIT_BRIDGE(DosSemClear, 4)
-        LX_NATIVE_INIT_16BIT_BRIDGE(DosSemWait, 8)
-        LX_NATIVE_INIT_16BIT_BRIDGE(DosSemSet, 4)
-    LX_NATIVE_MODULE_INIT_16BIT_SUPPORT_END()
-
-    GLoaderState->dosExit = DosExit;
+    if (GLoaderState) {
+        GLoaderState->dosExit = DosExit;
+    }
 
     if (pthread_mutex_init(&GMutexDosCalls, NULL) == -1) {
         fprintf(stderr, "pthread_mutex_init failed!\n");
-        return 0;
+        abort();
     } // if
 
     MaxHFiles = 20;  // seems to be OS/2's default.
     HFiles = (HFileInfo *) malloc(sizeof (HFileInfo) * MaxHFiles);
     if (!HFiles) {
+        pthread_mutex_destroy(&GMutexDosCalls);
         fprintf(stderr, "Out of memory!\n");
-        return 0;
+        abort();
     } // if
 
     HFileInfo *info = HFiles;
@@ -3007,88 +2913,32 @@ static int initDoscalls(void)
         HFiles[i].type = 1;  // !!! FIXME: could be a pipe or file.
         HFiles[i].attr = DAW_STDIN | DAW_STDOUT | DAW_LEVEL1 | DAW_CHARACTER;
     } // for
+}
 
-    return 1;
-} // initDoscalls
+LX_NATIVE_DESTRUCTOR(doscalls)
+{
+    if (GLoaderState) {
+        GLoaderState->dosExit = NULL;
+    }
 
-LX_NATIVE_MODULE_INIT({ if (!initDoscalls()) return NULL; })
-    LX_NATIVE_EXPORT16(DosSemRequest, 140),
-    LX_NATIVE_EXPORT16(DosSemClear, 141),
-    LX_NATIVE_EXPORT16(DosSemWait, 142),
-    LX_NATIVE_EXPORT16(DosSemSet, 143),
-    LX_NATIVE_EXPORT(DosSetMaxFH, 209),
-    LX_NATIVE_EXPORT(DosSetPathInfo, 219),
-    LX_NATIVE_EXPORT(DosQueryPathInfo, 223),
-    LX_NATIVE_EXPORT(DosQueryHType, 224),
-    LX_NATIVE_EXPORT(DosScanEnv, 227),
-    LX_NATIVE_EXPORT(DosSleep, 229),
-    LX_NATIVE_EXPORT(DosGetDateTime, 230),
-    LX_NATIVE_EXPORT(DosDevConfig, 231),
-    LX_NATIVE_EXPORT(DosExit, 234),
-    LX_NATIVE_EXPORT(DosResetBuffer, 254),
-    LX_NATIVE_EXPORT(DosSetFilePtr, 256),
-    LX_NATIVE_EXPORT(DosClose, 257),
-    LX_NATIVE_EXPORT(DosDelete, 259),
-    LX_NATIVE_EXPORT(DosFindClose, 263),
-    LX_NATIVE_EXPORT(DosFindFirst, 264),
-    LX_NATIVE_EXPORT(DosFindNext, 265),
-    LX_NATIVE_EXPORT(DosSetFileSize, 272),
-    LX_NATIVE_EXPORT(DosOpen, 273),
-    LX_NATIVE_EXPORT(DosQueryCurrentDir, 274),
-    LX_NATIVE_EXPORT(DosQueryCurrentDisk, 275),
-    LX_NATIVE_EXPORT(DosQueryFHState, 276),
-    LX_NATIVE_EXPORT(DosQueryFSAttach, 277),
-    LX_NATIVE_EXPORT(DosQueryFileInfo, 279),
-    LX_NATIVE_EXPORT(DosWaitChild, 280),
-    LX_NATIVE_EXPORT(DosRead, 281),
-    LX_NATIVE_EXPORT(DosWrite, 282),
-    LX_NATIVE_EXPORT(DosExecPgm, 283),
-    LX_NATIVE_EXPORT(DosSetProcessCp, 289),
-    LX_NATIVE_EXPORT(DosQueryCp, 291),
-    LX_NATIVE_EXPORT(DosExitList, 296),
-    LX_NATIVE_EXPORT(DosAllocMem, 299),
-    LX_NATIVE_EXPORT(DosFreeMem, 304),
-    LX_NATIVE_EXPORT(DosSetMem, 305),
-    LX_NATIVE_EXPORT(DosCreateThread, 311),
-    LX_NATIVE_EXPORT(DosGetInfoBlocks, 312),
-    LX_NATIVE_EXPORT(DosLoadModule, 318),
-    LX_NATIVE_EXPORT(DosQueryModuleHandle, 319),
-    LX_NATIVE_EXPORT(DosQueryModuleName, 320),
-    LX_NATIVE_EXPORT(DosQueryProcAddr, 321),
-    LX_NATIVE_EXPORT(DosQueryAppType, 323),
-    LX_NATIVE_EXPORT(DosCreateEventSem, 324),
-    LX_NATIVE_EXPORT(DosCloseEventSem, 326),
-    LX_NATIVE_EXPORT(DosResetEventSem, 327),
-    LX_NATIVE_EXPORT(DosPostEventSem, 328),
-    LX_NATIVE_EXPORT(DosWaitEventSem, 329),
-    LX_NATIVE_EXPORT(DosQueryEventSem, 330),
-    LX_NATIVE_EXPORT(DosCreateMutexSem, 331),
-    LX_NATIVE_EXPORT(DosCloseMutexSem, 333),
-    LX_NATIVE_EXPORT(DosRequestMutexSem, 334),
-    LX_NATIVE_EXPORT(DosReleaseMutexSem, 335),
-    LX_NATIVE_EXPORT(DosSubSetMem, 344),
-    LX_NATIVE_EXPORT(DosSubAllocMem, 345),
-    LX_NATIVE_EXPORT(DosSubFreeMem, 346),
-    LX_NATIVE_EXPORT(DosQuerySysInfo, 348),
-    LX_NATIVE_EXPORT(DosWaitThread, 349),
-    LX_NATIVE_EXPORT(DosSetExceptionHandler, 354),
-    LX_NATIVE_EXPORT(DosUnsetExceptionHandler, 355),
-    LX_NATIVE_EXPORT(DosQuerySysState, 368),
-    LX_NATIVE_EXPORT(DosSetSignalExceptionFocus, 378),
-    LX_NATIVE_EXPORT(DosEnterMustComplete, 380),
-    LX_NATIVE_EXPORT(DosExitMustComplete, 381),
-    LX_NATIVE_EXPORT(DosSetRelMaxFH, 382),
-    LX_NATIVE_EXPORT(DosFlatToSel, 425),
-    LX_NATIVE_EXPORT(DosSelToFlat, 426),
-    LX_NATIVE_EXPORT(DosAllocThreadLocalMemory, 454),
-    LX_NATIVE_EXPORT(DosFreeThreadLocalMemory, 455),
-    LX_NATIVE_EXPORT(DosR3ExitAddr, 553),
-    LX_NATIVE_EXPORT(DosQueryHeaderInfo, 582),
-    LX_NATIVE_EXPORT(DosQueryExtLIBPATH, 874),
-    LX_NATIVE_EXPORT(DosQueryThreadContext, 877),
-    LX_NATIVE_EXPORT(DosOpenL, 981)
-LX_NATIVE_MODULE_INIT_END()
+    ExitListItem *next = GExitList;
+    GExitList = NULL;
 
+    for (ExitListItem *item = next; item; item = next) {
+        next = item->next;
+        free(item);
+    } // for
+
+    for (uint32 i = 0; i < MaxHFiles; i++) {
+        if (HFiles[i].fd > 2)  // don't close -1, or any stdio handles.
+            close(HFiles[i].fd);
+    } // for
+    free(HFiles);
+    HFiles = NULL;
+    MaxHFiles = 0;
+
+    pthread_mutex_destroy(&GMutexDosCalls);
+}
 
 // end of doscalls.c ...
 

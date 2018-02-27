@@ -40,7 +40,7 @@ typedef struct
     ULONG ObjectBuffLen;
 } STARTDATA, *PSTARTDATA;
 
-OS2EXPORT APIRET OS2API DosStartSession(PSTARTDATA psd, PULONG pidSession, PPID ppid);
+OS2EXPORT APIRET OS2API DosStartSession(PSTARTDATA psd, PULONG pidSession, PPID ppid) OS2APIINFO(37);
 
 #ifdef __cplusplus
 }

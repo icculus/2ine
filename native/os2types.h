@@ -15,6 +15,10 @@
 extern "C" {
 #endif
 
+// this doesn't do anything when compiling, but a script parses these in
+//  the headers to generate some code.
+#define OS2APIINFO(retfcount)
+
 #ifndef APIENTRY
 #define APIENTRY
 #endif

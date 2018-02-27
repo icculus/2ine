@@ -876,24 +876,24 @@ enum {
 
 // API entry points...
 
-OS2EXPORT HAB OS2API WinInitialize(ULONG flOptions);
-OS2EXPORT BOOL OS2API WinTerminate(HAB hab);
-OS2EXPORT ERRORID OS2API WinGetLastError(HAB hab);
-OS2EXPORT HMQ OS2API WinCreateMsgQueue(HAB hab, LONG cmsg);
-OS2EXPORT BOOL OS2API WinGetMsg(HAB hab, PQMSG pqmsg, HWND hwndFilter, ULONG msgFilterFirst, ULONG msgFilterLast);
-OS2EXPORT MRESULT OS2API WinDispatchMsg(HAB hab, PQMSG pqmsg);
-OS2EXPORT BOOL OS2API WinDestroyMsgQueue(HMQ hmq);
-OS2EXPORT HWND OS2API WinCreateStdWindow(HWND hwndParent, ULONG flStyle, PULONG pflCreateFlags, PSZ pszClientClass, PSZ pszTitle, ULONG styleClient, HMODULE hmod, ULONG idResources, PHWND phwndClient);
-OS2EXPORT HWND OS2API WinCreateWindow(HWND hwndParent, PSZ pszClass, PSZ pszName, ULONG flStyle, LONG x, LONG y, LONG cx, LONG cy, HWND hwndOwner, HWND hwndInsertBehind, ULONG id, PVOID pCtlData, PVOID pPresParams);
-OS2EXPORT BOOL OS2API WinDestroyWindow(HWND hwnd);
-OS2EXPORT BOOL OS2API WinRegisterClass(HAB hab, PSZ pszClassName, PFNWP pfnWndProc, ULONG flStyle, ULONG cbWindowData);
-OS2EXPORT MRESULT OS2API WinDefWindowProc(HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2);
-OS2EXPORT MRESULT OS2API WinSendMsg(HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2);
-OS2EXPORT BOOL OS2API WinPostMsg(HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2);
-OS2EXPORT BOOL OS2API WinPostQueueMsg(HMQ hmq, ULONG msg, MPARAM mp1, MPARAM mp2);
-OS2EXPORT HPS OS2API WinBeginPaint(HWND hwnd, HPS hps, PRECTL prclPaint);
-OS2EXPORT BOOL OS2API WinEndPaint(HPS hps);
-OS2EXPORT BOOL OS2API WinFillRect(HPS hps, PRECTL prcl, LONG lColor);
+OS2EXPORT HAB OS2API WinInitialize(ULONG flOptions) OS2APIINFO(763);
+OS2EXPORT BOOL OS2API WinTerminate(HAB hab) OS2APIINFO(888);
+OS2EXPORT ERRORID OS2API WinGetLastError(HAB hab) OS2APIINFO(753);
+OS2EXPORT HMQ OS2API WinCreateMsgQueue(HAB hab, LONG cmsg) OS2APIINFO(716);
+OS2EXPORT BOOL OS2API WinGetMsg(HAB hab, PQMSG pqmsg, HWND hwndFilter, ULONG msgFilterFirst, ULONG msgFilterLast) OS2APIINFO(915);
+OS2EXPORT MRESULT OS2API WinDispatchMsg(HAB hab, PQMSG pqmsg) OS2APIINFO(912);
+OS2EXPORT BOOL OS2API WinDestroyMsgQueue(HMQ hmq) OS2APIINFO(726);
+OS2EXPORT HWND OS2API WinCreateStdWindow(HWND hwndParent, ULONG flStyle, PULONG pflCreateFlags, PSZ pszClientClass, PSZ pszTitle, ULONG styleClient, HMODULE hmod, ULONG idResources, PHWND phwndClient) OS2APIINFO(908);
+OS2EXPORT HWND OS2API WinCreateWindow(HWND hwndParent, PSZ pszClass, PSZ pszName, ULONG flStyle, LONG x, LONG y, LONG cx, LONG cy, HWND hwndOwner, HWND hwndInsertBehind, ULONG id, PVOID pCtlData, PVOID pPresParams) OS2APIINFO(909);
+OS2EXPORT BOOL OS2API WinDestroyWindow(HWND hwnd) OS2APIINFO(728);
+OS2EXPORT BOOL OS2API WinRegisterClass(HAB hab, PSZ pszClassName, PFNWP pfnWndProc, ULONG flStyle, ULONG cbWindowData) OS2APIINFO(926);
+OS2EXPORT MRESULT OS2API WinDefWindowProc(HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2) OS2APIINFO(911);
+OS2EXPORT MRESULT OS2API WinSendMsg(HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2) OS2APIINFO(920);
+OS2EXPORT BOOL OS2API WinPostMsg(HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2) OS2APIINFO(919);
+OS2EXPORT BOOL OS2API WinPostQueueMsg(HMQ hmq, ULONG msg, MPARAM mp1, MPARAM mp2) OS2APIINFO(902);
+OS2EXPORT HPS OS2API WinBeginPaint(HWND hwnd, HPS hps, PRECTL prclPaint) OS2APIINFO(703);
+OS2EXPORT BOOL OS2API WinEndPaint(HPS hps) OS2APIINFO(738);
+OS2EXPORT BOOL OS2API WinFillRect(HPS hps, PRECTL prcl, LONG lColor) OS2APIINFO(743);
 
 #ifdef __cplusplus
 }

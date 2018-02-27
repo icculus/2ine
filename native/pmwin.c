@@ -10,6 +10,8 @@
 #include "pmwin.h"
 #include "SDL.h"
 
+#include "pmwin-lx.h"
+
 // NOTE: PM reference manual says OS/2 generally ignores the HAB you pass
 //  to functions, instead getting that info from the current thread, but
 //  other IBM platforms might not do that, so programs should always pass
@@ -1638,27 +1640,6 @@ BOOL WinFillRect(HPS hps, PRECTL prcl, LONG lColor)
     SDL_RenderSetClipRect(renderer, NULL);
     return TRUE;
 } // WinFillRect
-
-LX_NATIVE_MODULE_INIT()
-    LX_NATIVE_EXPORT(WinBeginPaint, 703),
-    LX_NATIVE_EXPORT(WinCreateMsgQueue, 716),
-    LX_NATIVE_EXPORT(WinDestroyMsgQueue, 726),
-    LX_NATIVE_EXPORT(WinDestroyWindow, 728),
-    LX_NATIVE_EXPORT(WinEndPaint, 738),
-    LX_NATIVE_EXPORT(WinFillRect, 743),
-    LX_NATIVE_EXPORT(WinGetLastError, 753),
-    LX_NATIVE_EXPORT(WinInitialize, 763),
-    LX_NATIVE_EXPORT(WinTerminate, 888),
-    LX_NATIVE_EXPORT(WinPostQueueMsg, 902),
-    LX_NATIVE_EXPORT(WinCreateStdWindow, 908),
-    LX_NATIVE_EXPORT(WinCreateWindow, 909),
-    LX_NATIVE_EXPORT(WinDefWindowProc, 911),
-    LX_NATIVE_EXPORT(WinDispatchMsg, 912),
-    LX_NATIVE_EXPORT(WinGetMsg, 915),
-    LX_NATIVE_EXPORT(WinPostMsg, 919),
-    LX_NATIVE_EXPORT(WinSendMsg, 920),
-    LX_NATIVE_EXPORT(WinRegisterClass, 926)
-LX_NATIVE_MODULE_INIT_END()
 
 // end of pmwin.c ...
 

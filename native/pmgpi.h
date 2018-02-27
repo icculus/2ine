@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-OS2EXPORT BOOL OS2API GpiQueryTextBox(HPS hps, LONG lCount1, PCH pchString, LONG lCount2, PPOINTL aptlPoints);
+OS2EXPORT BOOL OS2API GpiQueryTextBox(HPS hps, LONG lCount1, PCH pchString, LONG lCount2, PPOINTL aptlPoints) OS2APIINFO(489);
 
 #ifdef __cplusplus
 }

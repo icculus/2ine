@@ -9,6 +9,12 @@
 #ifndef _INCL_OS2NATIVE_H_
 #define _INCL_OS2NATIVE_H_
 
+/* Unless forced off, build in support for OS/2 binaries (the LX export tables, 16-bit bridge code, etc) */
+#ifndef LX_LEGACY
+#define LX_LEGACY 1
+#endif
+
+#define _DARWIN_C_SOURCE 1
 #define _POSIX_C_SOURCE 199309
 #define _DEFAULT_SOURCE
 #define _GNU_SOURCE
@@ -28,19 +34,19 @@
 static LxLoaderState *GLoaderState = NULL;
 
 #if 1
-#define TRACE_NATIVE(...) do { if (GLoaderState->trace_native) { fprintf(stderr, "2INE TRACE [%lu]: ", (unsigned long) pthread_self()); fprintf(stderr, __VA_ARGS__); fprintf(stderr, ";\n"); } } while (0)
+#define TRACE_NATIVE(...) do { if (GLoaderState && GLoaderState->trace_native) { fprintf(stderr, "2INE TRACE [%lu]: ", (unsigned long) pthread_self()); fprintf(stderr, __VA_ARGS__); fprintf(stderr, ";\n"); } } while (0)
 #else
 #define TRACE_NATIVE(...) do {} while (0)
 #endif
 
 #if 1
-#define TRACE_EVENT(...) do { if (GLoaderState->trace_events) { fprintf(stderr, "2INE TRACE [%lu]: ", (unsigned long) pthread_self()); fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n"); } } while (0)
+#define TRACE_EVENT(...) do { if (GLoaderState && GLoaderState->trace_events) { fprintf(stderr, "2INE TRACE [%lu]: ", (unsigned long) pthread_self()); fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n"); } } while (0)
 #else
 #define TRACE_EVENT(...) do {} while (0)
 #endif
 
 OS2EXPORT const LxExport * lxNativeModuleInit(LxLoaderState *lx_state, uint32 *lx_num_exports);
-void OS2EXPORT lxNativeModuleDeinit(void);
+OS2EXPORT void lxNativeModuleDeinit(void);
 
 #define LX_NATIVE_MODULE_DEINIT(deinitcode) \
     void lxNativeModuleDeinit(void) { \
@@ -62,6 +68,9 @@ void OS2EXPORT lxNativeModuleDeinit(void);
     *lx_num_exports = sizeof (lx_native_exports) / sizeof (lx_native_exports[0]); \
     return lx_native_exports; \
 }
+
+#define LX_NATIVE_CONSTRUCTOR(modname) void __attribute__((constructor)) lxNativeConstructor_##modname(void)
+#define LX_NATIVE_DESTRUCTOR(modname) void __attribute__((destructor)) lxNativeDestructor_##modname(void)
 
 #endif
 

@@ -31,6 +31,8 @@
 
 #include <locale.h>
 
+#include "viocalls-lx.h"
+
 enum
 {
     VIOATTR_BACK_BLACK = 0x00,
@@ -230,14 +232,6 @@ APIRET16 VioGetMode(PVIOMODEINFO pvioModeInfo, HVIO hvio)
     return NO_ERROR;
 } // VioGetMode
 
-static APIRET16 bridge16to32_VioGetMode(uint8 *args)
-{
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(HVIO, hvio);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PVIOMODEINFO, pvmi);
-    return VioGetMode(pvmi, hvio);
-} // bridge16to32_VioGetMode
-
-
 APIRET16 VioGetCurPos(PUSHORT pusRow, PUSHORT pusColumn, HVIO hvio)
 {
     TRACE_NATIVE("VioGetCurPos(%p, %p, %u)", pusRow, pusColumn, (uint) hvio);
@@ -256,14 +250,6 @@ APIRET16 VioGetCurPos(PUSHORT pusRow, PUSHORT pusColumn, HVIO hvio)
     return NO_ERROR;
 } // VioGetCurPos
 
-static APIRET16 bridge16to32_VioGetCurPos(uint8 *args)
-{
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(HVIO, hvio);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PUSHORT, pusRow);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PUSHORT, pusColumn);
-    return VioGetCurPos(pusRow, pusColumn, hvio);
-} // bridge16to32_VioGetCurPos
-
 APIRET16 VioGetBuf(PULONG pLVB, PUSHORT pcbLVB, HVIO hvio)
 {
     TRACE_NATIVE("VioGetBuf(%p, %p, %u)", pLVB, pcbLVB, (uint) hvio);
@@ -279,16 +265,6 @@ APIRET16 VioGetBuf(PULONG pLVB, PUSHORT pcbLVB, HVIO hvio)
     return NO_ERROR;
 } // VioGetBuf
 
-static APIRET16 bridge16to32_VioGetBuf(uint8 *args)
-{
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(HVIO, hvio);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PUSHORT, pcbLVB);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PULONG, pLVB);
-    const APIRET16 retval = VioGetBuf(pLVB, pcbLVB, hvio);
-    *pLVB = GLoaderState->convert32to1616((void *) *pLVB);
-    return retval;
-} // bridge16to32_VioGetBuf
-
 APIRET16 VioGetCurType(PVIOCURSORINFO pvioCursorInfo, HVIO hvio)
 {
     TRACE_NATIVE("VioGetCurType(%p, %u)", pvioCursorInfo, (uint) hvio);
@@ -303,13 +279,6 @@ APIRET16 VioGetCurType(PVIOCURSORINFO pvioCursorInfo, HVIO hvio)
     memcpy(pvioCursorInfo, &vio_cursorinfo, sizeof (*pvioCursorInfo));
     return NO_ERROR;
 } // VioGetCurType
-
-static APIRET16 bridge16to32_VioGetCurType(uint8 *args)
-{
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(HVIO, hvio);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PVIOCURSORINFO, pvioCursorInfo);
-    return VioGetCurType(pvioCursorInfo, hvio);
-} // bridge16to32_VioGetCurType
 
 APIRET16 VioScrollUp(USHORT usTopRow, USHORT usLeftCol, USHORT usBotRow, USHORT usRightCol, USHORT cbLines, PBYTE pCell, HVIO hvio)
 {
@@ -378,18 +347,6 @@ return NO_ERROR;  // !!! FIXME: buggy
     return NO_ERROR;
 } // VioScrollUp
 
-static APIRET16 bridge16to32_VioScrollUp(uint8 *args)
-{
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(HVIO, hvio);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PBYTE, pCell);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, cbLines);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, usRightCol);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, usBotRow);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, usLeftCol);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, usTopRow);
-    return VioScrollUp(usTopRow, usLeftCol, usBotRow, usRightCol, cbLines, pCell, hvio);
-} // bridge16to32_VioGetCurType
-
 APIRET16 VioSetCurPos(USHORT usRow, USHORT usColumn, HVIO hvio)
 {
     TRACE_NATIVE("VioSetCurPos(%u, %u, %u)", (uint) usRow, (uint) usColumn, (uint) hvio);
@@ -411,27 +368,12 @@ APIRET16 VioSetCurPos(USHORT usRow, USHORT usColumn, HVIO hvio)
     return NO_ERROR;
 } // VioSetCurPos
 
-static APIRET16 bridge16to32_VioSetCurPos(uint8 *args)
-{
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(HVIO, hvio);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, usColumn);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, usRow);
-    return VioSetCurPos(usRow, usColumn, hvio);
-} // bridge16to32_VioSetCurPos
-
 APIRET16 VioSetCurType(PVIOCURSORINFO pvioCursorInfo, HVIO hvio)
 {
     TRACE_NATIVE("VioSetCurType(%p, %u)", pvioCursorInfo, (uint) hvio);
     FIXME("write me");
     return NO_ERROR;
 } // VioSetCurType
-
-static APIRET16 bridge16to32_VioSetCurType(uint8 *args)
-{
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(HVIO, hvio);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PVIOCURSORINFO, pvioCursorInfo);
-    return VioSetCurType(pvioCursorInfo, hvio);
-} // bridge16to32_VioSetCurType
 
 APIRET16 VioReadCellStr(PCH pchCellStr, PUSHORT pcb, USHORT usRow, USHORT usColumn, HVIO hvio)
 {
@@ -454,16 +396,6 @@ APIRET16 VioReadCellStr(PCH pchCellStr, PUSHORT pcb, USHORT usRow, USHORT usColu
     memcpy(pchCellStr, vio_buffer + idx, (size_t) *pcb);
     return NO_ERROR;
 } // VioReadCellStr
-
-static APIRET16 bridge16to32_VioReadCellStr(uint8 *args)
-{
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(HVIO, hvio);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, usColumn);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, usRow);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PUSHORT, pcb);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PCH, pchCellStr);
-    return VioReadCellStr(pchCellStr, pcb, usRow, usColumn, hvio);
-} // bridge16to32_VioReadCellStr
 
 APIRET16 VioWrtCellStr(PCH pchCellStr, USHORT cb, USHORT usRow, USHORT usColumn, HVIO hvio)
 {
@@ -490,16 +422,6 @@ APIRET16 VioWrtCellStr(PCH pchCellStr, USHORT cb, USHORT usRow, USHORT usColumn,
 
     return NO_ERROR;
 } // VioWrtCellStr
-
-static APIRET16 bridge16to32_VioWrtCellStr(uint8 *args)
-{
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(HVIO, hvio);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, usColumn);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, usRow);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, cb);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PCH, pchCellStr);
-    return VioWrtCellStr(pchCellStr, cb, usRow, usColumn, hvio);
-} // bridge16to32_VioWrtCellStr
 
 APIRET16 VioWrtCharStrAtt(PCH pch, USHORT cb, USHORT usRow, USHORT usColumn, PBYTE pAttr, HVIO hvio)
 {
@@ -531,18 +453,6 @@ APIRET16 VioWrtCharStrAtt(PCH pch, USHORT cb, USHORT usRow, USHORT usColumn, PBY
     return NO_ERROR;
 } // VioWrtCharStrAtt
 
-static APIRET16 bridge16to32_VioWrtCharStrAtt(uint8 *args)
-{
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(HVIO, hvio);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PBYTE, pAttr);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, usColumn);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, usRow);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, cb);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PCH, pch);
-    return VioWrtCharStrAtt(pch, cb, usRow, usColumn, pAttr, hvio);
-} // bridge16to32_VioWrtCharStrAtt
-
-
 APIRET16 VioWrtNCell(PBYTE pCell, USHORT cb, USHORT usRow, USHORT usColumn, HVIO hvio)
 {
     TRACE_NATIVE("VioWrtNCell(%p, %u, %u, %u, %u)", pCell, (uint) cb, (uint) usRow, (uint) usColumn, (uint) hvio);
@@ -570,67 +480,10 @@ APIRET16 VioWrtNCell(PBYTE pCell, USHORT cb, USHORT usRow, USHORT usColumn, HVIO
     return NO_ERROR;
 } // VioWrtNCell
 
-static APIRET16 bridge16to32_VioWrtNCell(uint8 *args)
+LX_NATIVE_DESTRUCTOR(viocalls)
 {
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(HVIO, hvio);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, usColumn);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, usRow);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, cb);
-    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PBYTE, pCell);
-    return VioWrtNCell(pCell, cb, usRow, usColumn, hvio);
-} // bridge16to32_VioWrtNCell
-
-
-LX_NATIVE_MODULE_16BIT_SUPPORT()
-    LX_NATIVE_MODULE_16BIT_API(VioScrollUp)
-    LX_NATIVE_MODULE_16BIT_API(VioGetCurPos)
-    LX_NATIVE_MODULE_16BIT_API(VioWrtCellStr)
-    LX_NATIVE_MODULE_16BIT_API(VioSetCurPos)
-    LX_NATIVE_MODULE_16BIT_API(VioGetMode)
-    LX_NATIVE_MODULE_16BIT_API(VioReadCellStr)
-    LX_NATIVE_MODULE_16BIT_API(VioGetCurType)
-    LX_NATIVE_MODULE_16BIT_API(VioGetBuf)
-    LX_NATIVE_MODULE_16BIT_API(VioSetCurType)
-    LX_NATIVE_MODULE_16BIT_API(VioWrtCharStrAtt)
-    LX_NATIVE_MODULE_16BIT_API(VioWrtNCell)
-LX_NATIVE_MODULE_16BIT_SUPPORT_END()
-
-static int initViocalls(void)
-{
-    LX_NATIVE_MODULE_INIT_16BIT_SUPPORT()
-        LX_NATIVE_INIT_16BIT_BRIDGE(VioScrollUp, 26)
-        LX_NATIVE_INIT_16BIT_BRIDGE(VioGetCurPos, 6)
-        LX_NATIVE_INIT_16BIT_BRIDGE(VioWrtCellStr, 12)
-        LX_NATIVE_INIT_16BIT_BRIDGE(VioSetCurPos, 6)
-        LX_NATIVE_INIT_16BIT_BRIDGE(VioGetMode, 6)
-        LX_NATIVE_INIT_16BIT_BRIDGE(VioReadCellStr, 12)
-        LX_NATIVE_INIT_16BIT_BRIDGE(VioGetCurType, 6)
-        LX_NATIVE_INIT_16BIT_BRIDGE(VioGetBuf, 10)
-        LX_NATIVE_INIT_16BIT_BRIDGE(VioSetCurType, 6)
-        LX_NATIVE_INIT_16BIT_BRIDGE(VioWrtCharStrAtt, 16)
-        LX_NATIVE_INIT_16BIT_BRIDGE(VioWrtNCell, 12)
-    LX_NATIVE_MODULE_INIT_16BIT_SUPPORT_END()
-    return 1;
-} // initViocalls
-
-LX_NATIVE_MODULE_INIT({ if (!initViocalls()) return NULL; })
-    LX_NATIVE_EXPORT16(VioScrollUp, 7),
-    LX_NATIVE_EXPORT16(VioGetCurPos, 9),
-    LX_NATIVE_EXPORT16(VioWrtCellStr, 10),
-    LX_NATIVE_EXPORT16(VioSetCurPos, 15),
-    LX_NATIVE_EXPORT16(VioGetMode, 21),
-    LX_NATIVE_EXPORT16(VioReadCellStr, 24),
-    LX_NATIVE_EXPORT16(VioGetCurType, 27),
-    LX_NATIVE_EXPORT16(VioGetBuf, 31),
-    LX_NATIVE_EXPORT16(VioSetCurType, 32),
-    LX_NATIVE_EXPORT16(VioWrtCharStrAtt, 48),
-    LX_NATIVE_EXPORT16(VioWrtNCell, 52)
-LX_NATIVE_MODULE_INIT_END()
-
-LX_NATIVE_MODULE_DEINIT({
     deinitNcurses();
-    LX_NATIVE_MODULE_DEINIT_16BIT_SUPPORT();
-})
+}
 
 // end of viocalls.c ...
 
