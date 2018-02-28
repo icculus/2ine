@@ -43,6 +43,11 @@ else()
     add_definitions(-DRELEASE)
 endif()
 
+option(LX_LEGACY "Enable OS/2 binary support (vs just native apps)" TRUE)
+if(NOT LX_LEGACY)
+    add_definitions(-DLX_LEGACY=0)
+endif()
+
 add_definitions(-std=c99 -Wall -ggdb3)
 add_definitions(-D_FILE_OFFSET_BITS=64)
 
@@ -68,29 +73,41 @@ endif()
 include_directories("/usr/local/include/SDL2")
 
 add_library(2ine SHARED "lib2ine.c")
-set_target_properties(2ine PROPERTIES COMPILE_FLAGS "-m32")
-set_target_properties(2ine PROPERTIES LINK_FLAGS "-m32 -ggdb3")
+if(LX_LEGACY)
+    set_target_properties(2ine PROPERTIES COMPILE_FLAGS "-m32")
+    set_target_properties(2ine PROPERTIES LINK_FLAGS "-m32 -ggdb3")
+endif()
 target_link_libraries(2ine "pthread")
 
 foreach(_I doscalls;msg;nls;quecalls;viocalls;kbdcalls;sesmgr;som;pmwin;pmshapi;pmgpi;tcpip32)
     add_library(${_I} SHARED "native/${_I}.c")
-    set_target_properties(${_I} PROPERTIES COMPILE_FLAGS "-m32")
-    set_target_properties(${_I} PROPERTIES LINK_FLAGS "-m32 -ggdb3")
+    if(LX_LEGACY)
+        set_target_properties(${_I} PROPERTIES COMPILE_FLAGS "-m32")
+        set_target_properties(${_I} PROPERTIES LINK_FLAGS "-m32 -ggdb3")
+    endif()
     target_link_libraries(${_I} 2ine)
 endforeach()
 
 target_link_libraries(doscalls "pthread")
 # FIXME target_link_libraries(viocalls ${CURSES_LIBRARIES})
 target_link_libraries(viocalls ncursesw)
-target_link_libraries(pmwin "${CMAKE_CURRENT_SOURCE_DIR}/libSDL2-2.0.so.0")
+
+# !!! FIXME: clean this up/
+if(LX_LEGACY)
+    target_link_libraries(pmwin "${CMAKE_CURRENT_SOURCE_DIR}/libSDL2-2.0.so.0")
+else()
+    target_link_libraries(pmwin "SDL2")
+endif()
 
 add_executable(lx_dump lx_dump.c)
 
-add_executable(lx_loader lx_loader.c)
-target_link_libraries(lx_loader 2ine)
-target_link_libraries(lx_loader "dl")
-set_target_properties(lx_loader PROPERTIES COMPILE_FLAGS "-m32")
-set_target_properties(lx_loader PROPERTIES LINK_FLAGS "-m32 -ggdb3")
+if(LX_LEGACY)
+    add_executable(lx_loader lx_loader.c)
+    target_link_libraries(lx_loader 2ine)
+    target_link_libraries(lx_loader "dl")
+    set_target_properties(lx_loader PROPERTIES COMPILE_FLAGS "-m32")
+    set_target_properties(lx_loader PROPERTIES LINK_FLAGS "-m32 -ggdb3")
+endif()
 
 # end of CMakeLists.txt ...
 

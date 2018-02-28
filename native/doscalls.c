@@ -463,6 +463,9 @@ APIRET DosUnsetExceptionHandler(PEXCEPTIONREGISTRATIONRECORD rec)
     return NO_ERROR;
 } // DosSetExceptionHandler
 
+#if !LX_LEGACY
+ULONG DosFlatToSel(VOID) { return 0; }
+#else
 ULONG _DosFlatToSel(PVOID ptr)
 {
     TRACE_NATIVE("DosFlatToSel(%p)", ptr);
@@ -493,6 +496,7 @@ __asm__ (
     "    ret  \n\t"
 	".size	_DosFlatToSel, .-_DosFlatToSel  \n\t"
 );
+#endif
 
 APIRET DosSetSignalExceptionFocus(BOOL32 flag, PULONG pulTimes)
 {
@@ -2710,6 +2714,9 @@ APIRET DosQueryThreadContext(TID tid, ULONG level, PCONTEXTRECORD pcxt)
     return ERROR_INVALID_PARAMETER;
 } // DosQueryThreadContext
 
+#if !LX_LEGACY
+ULONG DosSelToFlat(VOID) { return 0; }
+#else
 ULONG _DosSelToFlat(void *ptr)
 {
     TRACE_NATIVE("DosSelToFlat(%p)", ptr);
@@ -2718,6 +2725,7 @@ ULONG _DosSelToFlat(void *ptr)
 
 // DosSelToFlat() passes its argument in %eax, so a little asm to bridge that...
 __asm__ (
+    // !!! FIXME: this needs to protect more registers.
     ".globl DosSelToFlat  \n\t"
     ".type	DosSelToFlat, @function \n\t"
     "DosSelToFlat:  \n\t"
@@ -2727,6 +2735,7 @@ __asm__ (
     "    ret  \n\t"
 	".size	_DosSelToFlat, .-_DosSelToFlat  \n\t"
 );
+#endif
 
 static inline int trySpinLock(int *lock)
 {
