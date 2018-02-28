@@ -117,26 +117,9 @@ typedef struct
 
 static Window desktop_window;  // !!! FIXME: initialize and upkeep on this.
 
-// !!! FIXME: duplication from doscalls.c
-static LxTIB2 *getTib2(void)
-{
-    // just read the FS register, since we have to stick it there anyhow...
-    LxTIB2 *ptib2;
-    __asm__ __volatile__ ( "movl %%fs:0xC, %0  \n\t" : "=r" (ptib2) );
-    return ptib2;
-} // getTib2
-
-static inline LxPostTIB *getPostTib(void)
-{
-    // we store the LxPostTIB struct right after the TIB2 struct on the stack,
-    //  so get the TIB2's linear address from %fs:0xC, then step over it
-    //  to the LxPostTIB's linear address.
-    return (LxPostTIB *) (getTib2() + 1);
-} // getPostTib
-
 static inline AnchorBlock *getAnchorBlockNoHAB(void)
 {
-    return (AnchorBlock *) getPostTib()->anchor_block;
+    return (AnchorBlock *) LX_GETPOSTTIB()->anchor_block;
 } // getAnchorBlockNoHAB
 
 static AnchorBlock *getAnchorBlock(const HAB hab)
@@ -381,7 +364,7 @@ HAB WinInitialize(ULONG flOptions)
         return NULLHANDLE;  // reserved; must be zero.
     }
 
-    LxPostTIB *posttib = getPostTib();
+    LxPostTIB *posttib = LX_GETPOSTTIB();
     if (posttib->anchor_block != NULL) {
         return NULLHANDLE;  // fail if thread already has a HAB
     }
@@ -546,7 +529,7 @@ BOOL WinTerminate(HAB hab)
     }
 
     free(anchor);
-    getPostTib()->anchor_block = NULL;
+    LX_GETPOSTTIB()->anchor_block = NULL;
 
     SDL_Quit();  // !!! FIXME: does this reference count?
 

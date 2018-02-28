@@ -10,7 +10,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
-#include "lx_loader.h"
+
+#include "lib2ine.h"
 
 // !!! FIXME: some cut-and-paste with lx_loader.c ...
 

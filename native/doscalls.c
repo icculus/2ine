@@ -127,33 +127,15 @@ static void timespecNowPlusMilliseconds(struct timespec *waittime, const ULONG u
     } // if
 } // timespecNowPlusMilliseconds
 
-static PTIB2 getTib2(void)
-{
-    // just read the FS register, since we have to stick it there anyhow...
-    PTIB2 ptib2;
-    __asm__ __volatile__ ( "movl %%fs:0xC, %0  \n\t" : "=r" (ptib2) );
-    return ptib2;
-} // getTib2
-
-static PTIB getTib(void)
-{
-    // we store the TIB2 struct right after the TIB struct on the stack,
-    //  so get the TIB2's linear address from %fs:0xC, then step back
-    //  to the TIB's linear address.
-    uint8 *ptib2 = (uint8 *) getTib2();
-    return (PTIB) (ptib2 - sizeof (TIB));
-} // getTib
-
-
 APIRET DosGetInfoBlocks(PTIB *pptib, PPIB *pppib)
 {
     TRACE_NATIVE("DosGetInfoBlocks(%p, %p)", pptib, pppib);
 
     if (pptib != NULL)
-        *pptib = getTib();
+        *pptib = (PTIB) LX_GETTIB();
 
     if (pppib != NULL)
-        *pppib = (PPIB) &GLoaderState->pib;
+        *pppib = (PPIB) &GLoaderState.pib;
 
     return 0;
 } // DosGetInfoBlocks
@@ -255,7 +237,7 @@ APIRET DosScanEnv(PSZ name, PSZ *outval)
 {
     TRACE_NATIVE("DosScanEnv('%s', %p)", name, outval);
 
-    char *env = GLoaderState->pib.pib_pchenv;
+    char *env = GLoaderState.pib.pib_pchenv;
     const size_t len = strlen(name);
     while (*env) {
         if ((strncmp(env, name, len) == 0) && (env[len] == '=')) {
@@ -327,7 +309,7 @@ VOID DosExit(ULONG action, ULONG exitcode)
     // terminate the process.
     runDosExitList(TC_EXIT);
 
-    GLoaderState->terminate(exitcode);
+    GLoaderState.terminate(exitcode);
 } // DosExit
 
 APIRET DosExitList(ULONG ordercode, PFNEXITLIST fn)
@@ -484,7 +466,7 @@ APIRET DosUnsetExceptionHandler(PEXCEPTIONREGISTRATIONRECORD rec)
 ULONG _DosFlatToSel(PVOID ptr)
 {
     TRACE_NATIVE("DosFlatToSel(%p)", ptr);
-    return GLoaderState->convert32to1616(ptr);
+    return GLoaderState.convert32to1616(ptr);
 } // _DosFlatToSel
 
 // DosFlatToSel() passes its argument in %eax, so a little asm to bridge that...
@@ -517,19 +499,19 @@ APIRET DosSetSignalExceptionFocus(BOOL32 flag, PULONG pulTimes)
     TRACE_NATIVE("DosSetSignalExceptionFocus(%u, %p)", (uint) flag, pulTimes);
 
     if (flag == 0) {
-        if (GLoaderState->main_module->signal_exception_focus_count == 0)
+        if (GLoaderState.main_module->signal_exception_focus_count == 0)
             return ERROR_ALREADY_RESET;
-        GLoaderState->main_module->signal_exception_focus_count--;
+        GLoaderState.main_module->signal_exception_focus_count--;
     } else if (flag == 1) {
-        if (GLoaderState->main_module->signal_exception_focus_count == 0xFFFFFFFF)
+        if (GLoaderState.main_module->signal_exception_focus_count == 0xFFFFFFFF)
             return ERROR_NESTING_TOO_DEEP;
-        GLoaderState->main_module->signal_exception_focus_count++;
+        GLoaderState.main_module->signal_exception_focus_count++;
     } else {
         // !!! FIXME: does OS/2 do something if flag != 0 or 1?
     } // else
 
     if (pulTimes)
-        *pulTimes = GLoaderState->main_module->signal_exception_focus_count;
+        *pulTimes = GLoaderState.main_module->signal_exception_focus_count;
 
     // !!! FIXME: I guess enable/disable SIGINT handler here?
 
@@ -666,7 +648,7 @@ APIRET DosGetDateTime(PDATETIME pdt)
 
 static char *makeUnixPath(const char *os2path, APIRET *err)
 {
-    return GLoaderState->makeUnixPath(os2path, (uint32 *) err);
+    return GLoaderState.makeUnixPath(os2path, (uint32 *) err);
 } // makeUnixPath
 
 static APIRET doDosOpen(PSZ pszFileName, PHFILE pHf, PULONG pulAction, LONGLONG cbFile, ULONG ulAttribute, ULONG fsOpenFlags, ULONG fsOpenMode, PEAOP2 peaop2)
@@ -983,7 +965,7 @@ APIRET DosEnterMustComplete(PULONG pulNesting)
 {
     TRACE_NATIVE("DosEnterMustComplete(%p)", pulNesting);
 
-    PTIB2 tib2 = getTib2();
+    PTIB2 tib2 = (PTIB2) LX_GETTIB2();
     if (tib2->tib2_usMCCount == 0xFFFF) {
         return ERROR_NESTING_TOO_DEEP;
     } else if (tib2->tib2_usMCCount == 0) {
@@ -1002,7 +984,7 @@ APIRET DosExitMustComplete(PULONG pulNesting)
 {
     TRACE_NATIVE("DosExitMustComplete(%p)", pulNesting);
 
-    PTIB2 tib2 = getTib2();
+    PTIB2 tib2 = (PTIB2) LX_GETTIB2();
     if (tib2->tib2_usMCCount == 0) {
         return ERROR_ALREADY_RESET;
     } else if (tib2->tib2_usMCCount == 1) {
@@ -1212,7 +1194,7 @@ APIRET DosQueryFileInfo(HFILE hf, ULONG ulInfoLevel, PVOID pInfo, ULONG cbInfoBu
 static void os2ThreadCleanup(void *arg)
 {
     Thread *thread = (Thread *) arg;
-    GLoaderState->deinitOs2Tib(thread->selector);
+    GLoaderState.deinitOs2Tib(thread->selector);
     grabLock(&GMutexDosCalls);
     thread->prev = NULL;
     thread->next = GDeadThreads;
@@ -1223,7 +1205,8 @@ static void os2ThreadCleanup(void *arg)
 static void os2ThreadEntry2(uint8 *tibspace, Thread *thread)
 {
     void *esp = NULL;  // close enough.
-    thread->selector = GLoaderState->initOs2Tib(tibspace, &esp, thread->stacklen, (TID) thread);
+    GLoaderState.initOs2Tib(tibspace, &esp, thread->stacklen, (TID) thread);
+    thread->selector = GLoaderState.setOs2Tib(tibspace);
     pthread_cleanup_push(os2ThreadCleanup, thread);
     thread->fn(thread->fnarg);
     pthread_cleanup_pop(1);
@@ -1954,7 +1937,7 @@ APIRET DosQueryModuleHandle(PSZ pszModname, PHMODULE phmod)
     TRACE_NATIVE("DosQueryModuleHandle('%s', %p)", pszModname, phmod);
     grabLock(&GMutexDosCalls);
     LxModule *lxmod;
-    for (lxmod = GLoaderState->loaded_modules; lxmod; lxmod = lxmod->next) {
+    for (lxmod = GLoaderState.loaded_modules; lxmod; lxmod = lxmod->next) {
         if (strcasecmp(lxmod->name, pszModname) == 0)
             break;
     } // for
@@ -2378,7 +2361,7 @@ APIRET DosLoadModule(PSZ pszName, ULONG cbName, PSZ pszModname, PHMODULE phmod)
     *pszName = 0;
 
     FIXME("there's no mutex on this global state at the moment!");
-    LxModule *lxmod = GLoaderState->loadModule(pszModname);
+    LxModule *lxmod = GLoaderState.loadModule(pszModname);
     if (!lxmod)
         return ERROR_BAD_FORMAT;
 
@@ -2553,8 +2536,8 @@ APIRET DosAllocThreadLocalMemory(ULONG cb, PULONG *p)
     // this is probably expensive to do with the mutex held, but honestly,
     //  is there a lot of thread contention at the point where your app is
     //  allocating TLS?
-    if (GLoaderState->tlspage == NULL) {
-        if ((GLoaderState->tlspage = initTLSPage()) == NULL) {
+    if (GLoaderState.tlspage == NULL) {
+        if ((GLoaderState.tlspage = initTLSPage()) == NULL) {
             ungrabLock(&GMutexDosCalls);
             return ERROR_NOT_ENOUGH_MEMORY;
         } // if
@@ -2562,17 +2545,17 @@ APIRET DosAllocThreadLocalMemory(ULONG cb, PULONG *p)
 
     int i;
     for (i = 0; i < 32; i++, mask <<= 1) {
-        if (((GLoaderState->tlsmask ^ mask) & mask) == mask)
+        if (((GLoaderState.tlsmask ^ mask) & mask) == mask)
             break;
     } // for
 
     if (i == 32)
         retval = ERROR_NOT_ENOUGH_MEMORY; // there are only 32 slots, couldn't find anything contiguous.
     else {
-        assert(GLoaderState->tlsallocs[i] == 0);
-        GLoaderState->tlsallocs[i] = (uint8) cb;
-        GLoaderState->tlsmask |= mask;
-        *p = GLoaderState->tlspage + i;
+        assert(GLoaderState.tlsallocs[i] == 0);
+        GLoaderState.tlsallocs[i] = (uint8) cb;
+        GLoaderState.tlsmask |= mask;
+        *p = GLoaderState.tlspage + i;
         printf("allocated %u OS/2 TLS slot%s at %p\n", (uint) cb, (cb == 1) ? "" : "s", *p); fflush(stdout);
     } // else
         
@@ -2589,16 +2572,16 @@ APIRET DosFreeThreadLocalMemory(ULONG *p)
 
     grabLock(&GMutexDosCalls);
 
-    if (GLoaderState->tlspage) {
-        const uint32 slot = (uint32) (p - GLoaderState->tlspage);
+    if (GLoaderState.tlspage) {
+        const uint32 slot = (uint32) (p - GLoaderState.tlspage);
         if (slot < 32) {
-            const uint8 slots = GLoaderState->tlsallocs[slot];
+            const uint8 slots = GLoaderState.tlsallocs[slot];
             if (slots > 0) {
                 const uint32 mask = ((uint32) (0xFF >> (8 - slots))) << slot;
-                assert((GLoaderState->tlsmask & mask) == mask);
-                GLoaderState->tlsmask &= ~mask;
+                assert((GLoaderState.tlsmask & mask) == mask);
+                GLoaderState.tlsmask &= ~mask;
                 printf("freed %u OS/2 TLS slot%s at %p\n", (uint) slots, (slots == 1) ? "" : "s", p); fflush(stdout);
-                GLoaderState->tlsallocs[slot] = 0;
+                GLoaderState.tlsallocs[slot] = 0;
                 retval = NO_ERROR;
             } // if
         } // if
@@ -2640,13 +2623,13 @@ APIRET DosQueryHeaderInfo(HMODULE hmod, ULONG ulIndex, PVOID pvBuffer, ULONG cbB
         case QHINF_LIBPATHLENGTH:
             if (cbBuffer < sizeof (ULONG))
                 return ERROR_BUFFER_OVERFLOW;
-            *((ULONG *) pvBuffer) = GLoaderState->libpathlen;
+            *((ULONG *) pvBuffer) = GLoaderState.libpathlen;
             return NO_ERROR;
 
         case QHINF_LIBPATH:
-            if (cbBuffer < GLoaderState->libpathlen)
+            if (cbBuffer < GLoaderState.libpathlen)
                 return ERROR_BUFFER_OVERFLOW;
-            strcpy((char *) pvBuffer, GLoaderState->libpath);
+            strcpy((char *) pvBuffer, GLoaderState.libpath);
             return NO_ERROR;
 
         //case QHINF_FIXENTRY:
@@ -2730,7 +2713,7 @@ APIRET DosQueryThreadContext(TID tid, ULONG level, PCONTEXTRECORD pcxt)
 ULONG _DosSelToFlat(void *ptr)
 {
     TRACE_NATIVE("DosSelToFlat(%p)", ptr);
-    return (ULONG) GLoaderState->convert1616to32((uint32) ptr);
+    return (ULONG) GLoaderState.convert1616to32((uint32) ptr);
 } // _DosSelToFlat
 
 // DosSelToFlat() passes its argument in %eax, so a little asm to bridge that...
@@ -2873,9 +2856,7 @@ APIRET DosSetFileSize(HFILE h, ULONG len)
 
 LX_NATIVE_CONSTRUCTOR(doscalls)
 {
-    if (GLoaderState) {
-        GLoaderState->dosExit = DosExit;
-    }
+    GLoaderState.dosExit = DosExit;
 
     if (pthread_mutex_init(&GMutexDosCalls, NULL) == -1) {
         fprintf(stderr, "pthread_mutex_init failed!\n");
@@ -2917,9 +2898,7 @@ LX_NATIVE_CONSTRUCTOR(doscalls)
 
 LX_NATIVE_DESTRUCTOR(doscalls)
 {
-    if (GLoaderState) {
-        GLoaderState->dosExit = NULL;
-    }
+    GLoaderState.dosExit = NULL;
 
     ExitListItem *next = GExitList;
     GExitList = NULL;

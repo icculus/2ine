@@ -6,8 +6,11 @@
  *  This file written by Ryan C. Gordon.
  */
 
-#ifndef _INCL_LX_LOADER_H_
-#define _INCL_LX_LOADER_H_ 1
+/* lib2ine is support code and data that is common between various native
+   reimplementations of the OS/2 API, and the OS/2 binary loader. */
+
+#ifndef _INCL_LIB2INE_H_
+#define _INCL_LIB2INE_H_ 1
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -219,44 +222,54 @@ typedef struct LxPostTIB
 
 #define LXTIBSIZE (sizeof (LxTIB) + sizeof (LxTIB2) + sizeof (LxPostTIB))
 
+#define LX_MAX_LDT_SLOTS 8192
+
 typedef struct LxLoaderState
 {
     LxModule *loaded_modules;
     LxModule *main_module;
     uint8 main_tibspace[LXTIBSIZE];
     LxPIB pib;
+    int using_lx_loader;
     int subprocess;
     int running;
     int trace_native;
     int trace_events;
+    uint8 main_tib_selector;
     uint16 original_cs;
     uint16 original_ds;
     uint16 original_es;
     uint16 original_ss;
-    uint32 ldt[8192];
+    uint32 *ldt; //[LX_MAX_LDT_SLOTS];
     char *libpath;
     uint32 libpathlen;
     uint32 *tlspage;
     uint32 tlsmask;  // one bit for each TLS slot in use.
     uint8 tlsallocs[32];  // number of TLS slots allocated in one block, indexed by starting block (zero if not the starting block).
     void (*dosExit)(uint32 action, uint32 result);
-    uint16 (*initOs2Tib)(uint8 *tibspace, void *_topOfStack, const size_t stacklen, const uint32 tid);
+    void (*initOs2Tib)(uint8 *tibspace, void *_topOfStack, const size_t stacklen, const uint32 tid);
+    uint16 (*setOs2Tib)(uint8 *tibspace);
+    LxTIB *(*getOs2Tib)(void);
     void (*deinitOs2Tib)(const uint16 selector);
     int (*findSelector)(const uint32 addr, uint16 *outselector, uint16 *outoffset, int iscode);
     void (*freeSelector)(const uint16 selector);
     void *(*convert1616to32)(const uint32 addr1616);
     uint32 (*convert32to1616)(void *addr32);
     LxModule *(*loadModule)(const char *modname);
-    int (*locatePathCaseInsensitive)(char *buf);
     char *(*makeUnixPath)(const char *os2path, uint32 *err);
-    char *(*makeOS2Path)(const char *fname);
     void __attribute__((noreturn)) (*terminate)(const uint32 exitcode);
 } LxLoaderState;
 
-typedef const LxExport *(*LxNativeModuleInitEntryPoint)(LxLoaderState *lx_state, uint32 *lx_num_exports);
+typedef const LxExport *(*LxNativeModuleInitEntryPoint)(uint32 *lx_num_exports);
 typedef void (*LxNativeModuleDeinitEntryPoint)(void);
+
+// !!! FIXME: need to change this symbol name.
+extern __attribute__((visibility("default"))) LxLoaderState GLoaderState;
+
+#define LX_NATIVE_CONSTRUCTOR(modname) void __attribute__((constructor)) lxNativeConstructor_##modname(void)
+#define LX_NATIVE_DESTRUCTOR(modname) void __attribute__((destructor)) lxNativeDestructor_##modname(void)
 
 #endif
 
-// end of lx_loader.h ...
+// end of lib2ine.h ...
 

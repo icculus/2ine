@@ -24,8 +24,8 @@
 #define LX_NATIVE_MODULE_16BIT_SUPPORT_END()
 
 #define LX_NATIVE_MODULE_DEINIT_16BIT_SUPPORT() \
-    if ((obj16.alias != 0xFFFF) && (GLoaderState)) { \
-        GLoaderState->freeSelector(obj16.alias); \
+    if (obj16.alias != 0xFFFF) { \
+        GLoaderState.freeSelector(obj16.alias); \
     } \
     if (obj16.mapped != NULL) { \
         munmap(obj16.mapped, obj16.size); \
@@ -59,7 +59,7 @@
     obj16.addr = mmapaddr; \
     \
     uint16 offset = 0; \
-    if (!GLoaderState->findSelector((uint32) obj16.addr, &obj16.alias, &offset, 1)) { \
+    if (!GLoaderState.findSelector((uint32) obj16.addr, &obj16.alias, &offset, 1)) { \
         fprintf(stderr, "couldn't find a selector for 16-bit entry points!\n"); \
         munmap(obj16.mapped, vsize); \
         obj16.mapped = obj16.addr = NULL; \
@@ -135,7 +135,7 @@ RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling
     *(ptr++) = 0xEA;  /*  ...jmp dword 0x7788:0x33332222 */ \
     const uint32 jmp32addr = (uint32) (ptr + 6); \
     memcpy(ptr, &jmp32addr, 4); ptr += 4; \
-    memcpy(ptr, &GLoaderState->original_cs, 2); ptr += 2; \
+    memcpy(ptr, &GLoaderState.original_cs, 2); ptr += 2; \
     \
     /* USE32 */ \
     *(ptr++) = 0x66;  /* mov bx,ss... */ \
@@ -162,7 +162,7 @@ RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling
     *(ptr++) = 0xC8;  /*  ...mov ax,cx */ \
     *(ptr++) = 0x66;  /* mov cx,0xabcd... */ \
     *(ptr++) = 0xB9;  /*  ...mov cx,0xabcd */ \
-    memcpy(ptr, &GLoaderState->original_ss, 2); ptr += 2; \
+    memcpy(ptr, &GLoaderState.original_ss, 2); ptr += 2; \
     *(ptr++) = 0x8E;  /* mov ss,ecx... */ \
     *(ptr++) = 0xD1;  /*  ...mov ss,ecx */ \
     *(ptr++) = 0x89;  /* mov esp,eax... */ \
@@ -173,17 +173,17 @@ RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling
     *(ptr++) = 0x53;  /* push ebx */ \
     *(ptr++) = 0x1E;  /* push ds */ \
     *(ptr++) = 0x06;  /* push es */ \
-    if (GLoaderState->original_ss != GLoaderState->original_ds) { \
+    if (GLoaderState.original_ss != GLoaderState.original_ds) { \
         *(ptr++) = 0x66;  /* mov cx,0x8888... */ \
         *(ptr++) = 0xB9;  /*  ...mov cx,0x8888 */ \
-        memcpy(ptr, &GLoaderState->original_ds, 2); ptr += 2; \
+        memcpy(ptr, &GLoaderState.original_ds, 2); ptr += 2; \
     } \
     *(ptr++) = 0x8E;  /* mov ds,ecx... */ \
     *(ptr++) = 0xD9;  /*  ...mov ds,ecx */ \
-    if (GLoaderState->original_ds != GLoaderState->original_es) { \
+    if (GLoaderState.original_ds != GLoaderState.original_es) { \
         *(ptr++) = 0x66;  /* mov cx,0x9999... */ \
         *(ptr++) = 0xB9;  /*  ...mov cx,0x9999 */ \
-        memcpy(ptr, &GLoaderState->original_es, 2); ptr += 2; \
+        memcpy(ptr, &GLoaderState.original_es, 2); ptr += 2; \
     } \
     *(ptr++) = 0x8E;  /* mov es,ecx... */ \
     *(ptr++) = 0xC1;  /*  ...mov es,ecx */ \
@@ -224,7 +224,7 @@ RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling
     if (mprotect(obj16.mapped, vsize, PROT_READ | PROT_EXEC) == -1) { \
         fprintf(stderr, "mprotect() failed for 16-bit bridge code!\n"); \
         munmap(obj16.mapped, vsize); \
-        GLoaderState->freeSelector(obj16.alias); \
+        GLoaderState.freeSelector(obj16.alias); \
         obj16.mapped = obj16.addr = NULL; \
         obj16.size = 0; \
         obj16.alias = 0xFFFF; \
@@ -236,7 +236,7 @@ RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling
     const typ var = *((typ *) args); args += sizeof (typ)
 
 #define LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(typ, var) \
-    typ var = (typ) GLoaderState->convert1616to32(*((uint32 *) args)); args += sizeof (uint32)
+    typ var = (typ) GLoaderState.convert1616to32(*((uint32 *) args)); args += sizeof (uint32)
 
 #define LX_NATIVE_EXPORT16(fn, ord) { ord, #fn, &fn##16, &obj16 }
 
