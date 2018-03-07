@@ -15,29 +15,9 @@
 
 // !!! FIXME: some cut-and-paste with lx_loader.c ...
 
-static int sanityCheckExe(uint8 **_exe, uint32 *_exelen)
+static int sanityCheckLxExe(const uint8 *exe)
 {
-    if (*_exelen < 196) {
-        fprintf(stderr, "not an OS/2 LX EXE\n");
-        return 0;
-    }
-    const uint32 header_offset = *((uint32 *) (*_exe + 0x3C));
-    //printf("header offset is %u\n", (uint) header_offset);
-    if ((header_offset + sizeof (LxHeader)) >= *_exelen) {
-        fprintf(stderr, "not an OS/2 LX EXE\n");
-        return 0;
-    }
-
-    *_exe += header_offset;  // skip the DOS stub, etc.
-    *_exelen -= header_offset;
-
-    const LxHeader *lx = (const LxHeader *) *_exe;
-
-    if ((lx->magic_l != 'L') || (lx->magic_x != 'X')) {
-        fprintf(stderr, "not an OS/2 LX EXE\n");
-        return 0;
-    }
-
+    const LxHeader *lx = (const LxHeader *) exe;
     if ((lx->byte_order != 0) || (lx->word_order != 0)) {
         fprintf(stderr, "Program is not little-endian!\n");
         return 0;
@@ -64,18 +44,53 @@ static int sanityCheckExe(uint8 **_exe, uint32 *_exelen)
     }
 
     return 1;
+} // sanityCheckLxExe
+
+static int sanityCheckNeExe(const uint8 *exe)
+{
+    const NeHeader *ne = (const NeHeader *) exe;
+    if (ne->exe_type != 1) {
+        fprintf(stderr, "Not an OS/2 NE EXE file (exe_type is %d, not 1)\n", (int) ne->exe_type);
+        return 0;
+    }
+
+    return 1;
+} // sanityCheckNeExe
+
+static int sanityCheckExe(uint8 **_exe, uint32 *_exelen, int *_is_lx)
+{
+    if (*_exelen < 196) {
+        fprintf(stderr, "not an OS/2 EXE\n");
+        return 0;
+    }
+    const uint32 header_offset = *((uint32 *) (*_exe + 0x3C));
+    //printf("header offset is %u\n", (uint) header_offset);
+    if ((header_offset + sizeof (LxHeader)) >= *_exelen) {
+        fprintf(stderr, "not an OS/2 EXE\n");
+        return 0;
+    }
+
+    *_exe += header_offset;  // skip the DOS stub, etc.
+    *_exelen -= header_offset;
+
+    const uint8 *magic = *_exe;
+
+    if ((magic[0] == 'L') && (magic[1] == 'X')) {
+        *_is_lx = 1;
+        return sanityCheckLxExe(*_exe);
+    } else if ((magic[0] == 'N') && (magic[1] == 'E')) {
+        *_is_lx = 0;
+        return sanityCheckNeExe(*_exe);
+    }
+
+    fprintf(stderr, "not an OS/2 EXE\n");
+    return 0;
 } // sanityCheckExe
 
-
-static void parseExe(const char *exefname, uint8 *exe, uint32 exelen)
+static int parseLxExe(const uint8 *origexe, const uint8 *exe)
 {
-    printf("%s\n", exefname);
-
-    const uint8 *origexe = exe;
-    if (!sanityCheckExe(&exe, &exelen))
-        return;
-
     const LxHeader *lx = (const LxHeader *) exe;
+    printf("LX (32-bit) executable.\n");
     printf("module version: %u\n", (uint) lx->module_version);
 
     printf("module flags:");
@@ -516,6 +531,298 @@ static void parseExe(const char *exefname, uint8 *exe, uint32 exelen)
         const uint16 ordinal = *((const uint16 *) name_table); name_table += 2;
         printf("%u: '%s' (ordinal %u)\n", (uint) i, name, (uint) ordinal);
     } // for
+
+    return 1;
+} // parseLxExe
+
+static int parseNeExe(const uint8 *origexe, const uint8 *exe)
+{
+    const NeHeader *ne = (const NeHeader *) exe;
+    printf("NE (16-bit) executable.\n");
+    printf("Linker version: %u\n", (uint) ne->linker_version);
+    printf("Linker revision: %u\n", (uint) ne->linker_revision);
+    printf("Entry table offset: %u\n", (uint) ne->entry_table_offset);
+    printf("Entry table size: %u\n", (uint) ne->entry_table_size);
+    printf("CRC32: 0x%X\n", (uint) ne->crc32);
+    printf("Module flags:");
+    if (ne->module_flags == 0) printf(" NOAUTODATA");
+    if (ne->module_flags & 0x1) printf(" SINGLEDATA");
+    if (ne->module_flags & 0x2) printf(" MULTIPLEDATA");
+    if (ne->module_flags & 0x2000) printf(" NOTLOADABLE");
+    if (ne->module_flags & 0x8000) printf(" LIBRARYMODULE");
+    printf("\n");
+    printf("Automatic data segment: %u\n", (uint) ne->auto_data_segment);
+    printf("Dynamic heap size: %u\n", (uint) ne->dynamic_heap_size);
+    printf("Stack size: %u\n", (uint) ne->stack_size);
+    printf("Initial code address: %X:%X\n", (uint) ne->reg_cs, (uint) ne->reg_ip);
+    printf("Initial stack address: %X:%X\n", (uint) ne->reg_ss, (uint) ne->reg_sp);
+    printf("Number of segment table entries: %u\n", (uint) ne->num_segment_table_entries);
+    printf("Number of module reference table entries: %u\n", (uint) ne->num_module_ref_table_entries);
+    printf("Non-resident name table size: %u\n", (uint) ne->non_resident_name_table_size);
+    printf("Segment table offset: %u\n", (uint) ne->segment_table_offset);
+    printf("Resource table offset: %u\n", (uint) ne->resource_table_offset);
+    printf("Resident name table offset: %u\n", (uint) ne->resident_name_table_offset);
+    printf("Module reference table offset: %u\n", (uint) ne->module_reference_table_offset);
+    printf("Imported names table offset: %u\n", (uint) ne->imported_names_table_offset);
+    printf("Non-resident name table offset: %u\n", (uint) ne->non_resident_name_table_offset);
+    printf("Number of movable entries: %u\n", (uint) ne->num_movable_entries);
+    printf("Sector alignment shift count: %u (%u bytes)\n", (uint) ne->sector_alignment_shift_count, (uint) (1 << ne->sector_alignment_shift_count));
+    printf("Number of resource entries: %u\n", (uint) ne->num_resource_entries);
+    printf("Executable type: %u\n", (uint) ne->exe_type);
+    printf("\n");
+
+    const uint32 sector_size = 1 << ne->sector_alignment_shift_count;
+
+    if (ne->num_segment_table_entries > 0) {
+        const uint32 total = (uint32) ne->num_segment_table_entries;
+        printf("Segment table (%u entries):\n", (uint) total);
+        const NeSegmentTableEntry *seg = (const NeSegmentTableEntry *) (exe + ne->segment_table_offset);
+        for (uint32 i = 0; i < total; i++, seg++) {
+            printf(" %u:\n", (uint) (i+1));
+            printf("  Logical-sector offset: %u", (uint) seg->offset);
+            if (seg->offset == 0) {
+                printf(" (no file data)\n");
+            } else {
+                printf(" (byte position %u)\n", (uint) (seg->offset * sector_size));
+            }
+            printf("  Size: %u\n", (seg->size == 0) ? (uint) 0x10000 : (uint) seg->size);
+            printf("  Segment flags:");
+            switch (seg->segment_flags & 0x7) {
+                case 0: printf(" CODE"); break;
+                case 1: printf(" DATA"); break;
+                default: printf(" [UNKNOWN SEGMENT TYPE]"); break;
+            }
+            if (seg->segment_flags & 0x10) printf(" MOVABLE");
+            if (seg->segment_flags & 0x40) printf(" PRELOAD");
+            if (seg->segment_flags & 0x100) printf(" RELOCINFO");
+            if (seg->segment_flags & 0xF000) printf(" DISCARD");
+            printf("\n");
+            printf("  Minimum allocation: %u\n", (seg->minimum_allocation == 0) ? (uint) 0x10000 : (uint) seg->minimum_allocation);
+
+            if (seg->segment_flags & 0x100) {  // has relocations (fixups)
+                const uint8 *segptr = origexe + (seg->offset * sector_size);
+                const uint8 *fixupptr = segptr + (seg->size ? seg->size : 0xFFFF);
+                const uint32 num_fixups = (uint32) *((const uint16 *) fixupptr); fixupptr += 2;
+                printf("  Fixup records (%u entries):\n", (uint) num_fixups);
+                for (uint32 j = 0; j < num_fixups; j++) {
+                    const uint8 srctype = *(fixupptr++);
+                    const uint8 flags = *(fixupptr++);
+                    uint32 srcchain_offset = (uint32) *((const uint16 *) fixupptr); fixupptr += 2;
+                    const int additive = (flags & 0x4);
+                    fixupptr += 4;  // !!! FIXME
+                    printf("   %u:\n", (uint) j);
+                    printf("    Source type: ");
+                    switch (srctype & 0xF) {
+                        case 0: printf("LOBYTE"); break;
+                        case 2: printf("SEGMENT"); break;
+                        case 3: printf("FAR_ADDR"); break;
+                        case 5: printf("OFFSET"); break;
+                        default: printf("[unknown type]"); break;
+                    }
+                    printf("\n");
+                    printf("    Flags:");
+                    switch (flags & 0x3) {
+                        case 0: printf(" INTERNALREF"); break;
+                        case 1: printf(" IMPORTORDINAL"); break;
+                        case 2: printf(" IMPORTNAME"); break;
+                        case 3: printf(" OSFIXUP"); break;
+                    }
+                    if (additive) printf(" ADDITIVE");
+                    printf("\n");
+
+                    if (additive) {
+                        printf("    Additive source: %u", (uint) srcchain_offset);
+                    } else {
+                        printf("    Source chain:");
+                        do {
+                            printf(" %u", (uint) srcchain_offset);
+                            srcchain_offset = *((const uint16 *) (segptr + srcchain_offset));
+                        } while (srcchain_offset < seg->size);
+                    }
+                    printf("\n");
+                }
+            }
+        }
+        printf("\n");
+    }
+
+    if (ne->num_resource_entries > 0) {
+        const uint8 *ptr = exe + ne->resource_table_offset;
+        const uint32 total = (uint32) ne->num_resource_entries;
+        printf("Resources (%u entries):\n", (uint) total);
+        int idx = 0;
+        while (*((const uint16 *) ptr)) {
+            const uint16 typeid = *((const uint16 *) ptr); ptr += 2;
+            const uint32 num_resources = (uint32) *((const uint16 *) ptr); ptr += 2;
+            ptr += 4;  // reserved.
+            for (uint32 j = 0; j < num_resources; j++) {
+                idx++;
+                printf(" %d:", idx);
+                printf("  Type ID: ");
+                if (typeid & 0x8000) {
+                    printf("%u\n", (uint) (typeid & ~0x8000));
+                } else {
+                    const uint8 *str = (exe + ne->resource_table_offset) + typeid;
+                    const uint32 len = (uint32) *(str++);
+                    printf("\"");
+                    for (uint32 k = 0; k < len; k++, str++) {
+                        printf("%c", (int) *str);
+                    }
+                    printf("\"\n");
+                }
+
+                const uint16 offset = *((const uint16 *) ptr); ptr += 2;
+                const uint16 size = *((const uint16 *) ptr); ptr += 2;
+                const uint16 flags = *((const uint16 *) ptr); ptr += 2;
+                const uint16 resourceid = *((const uint16 *) ptr); ptr += 2;
+                ptr += 4;  // reserved.
+                printf("  Offset: %u\n", (uint) offset);
+                printf("  Size: %u\n", (uint) size);
+                printf("  Flags:");
+                if (flags & 0x10) printf(" MOVABLE");
+                if (flags & 0x20) printf(" PURE");
+                if (flags & 0x40) printf(" PRELOAD");
+                printf("\n");
+                printf("  Resource ID: ");
+                if (resourceid & 0x8000) {
+                    printf("%u\n", (uint) (resourceid & ~0x8000));
+                } else {
+                    const uint8 *str = (exe + ne->resource_table_offset) + resourceid;
+                    const uint32 len = (uint32) *(str++);
+                    printf("\"");
+                    for (uint32 k = 0; k < len; k++, str++) {
+                        printf("%c", (int) *str);
+                    }
+                    printf("\"\n");
+                }
+            }
+        }
+        printf("\n");
+    }
+
+    if (ne->resident_name_table_offset > 0) {
+        const uint8 *name_table = exe + ne->resident_name_table_offset;
+        if (*name_table) {
+            printf("Resident name table:\n");
+            for (uint32 i = 0; *name_table; i++) {
+                const uint8 namelen = *(name_table++);
+                char name[256];
+                memcpy(name, name_table, namelen);
+                name[namelen] = '\0';
+                name_table += namelen;
+                const uint16 ordinal = *((const uint16 *) name_table); name_table += 2;
+                printf(" %u: '%s' (ordinal %u)\n", (uint) i, name, (uint) ordinal);
+            }
+            printf("\n");
+        }
+    }
+
+    if (ne->non_resident_name_table_offset > 0) {
+        const uint8 *name_table = origexe + ne->non_resident_name_table_offset;
+        const uint8 *end_of_name_table = name_table + ne->non_resident_name_table_size;
+        if ((name_table < end_of_name_table) && *name_table) {
+            printf("Non-resident name table:\n");
+            for (uint32 i = 0; (name_table < end_of_name_table) && *name_table; i++) {
+                const uint8 namelen = *(name_table++);
+                char name[256];
+                memcpy(name, name_table, namelen);
+                name[namelen] = '\0';
+                name_table += namelen;
+                const uint16 ordinal = *((const uint16 *) name_table); name_table += 2;
+                printf(" %u: '%s' (ordinal %u)\n", (uint) i, name, (uint) ordinal);
+            }
+            printf("\n");
+        }
+    }
+
+    if (ne->num_module_ref_table_entries > 0) {
+        const uint32 total = (uint32) ne->num_module_ref_table_entries;
+        printf("Module reference table (%u entries):\n", (uint) total);
+        const uint16 *ptr = (const uint16 *) (exe + ne->module_reference_table_offset);
+        for (uint32 i = 0; i < total; i++, ptr++) {
+            const uint8 *name = (exe + ne->imported_names_table_offset) + *ptr;
+            const uint32 name_string_len = (uint32) *name;
+            name++;
+            printf(" %u: ", (uint) i);
+            for (uint32 j = 0; j < name_string_len; j++, name++) {
+                printf("%c", (int) *name);
+            }
+            printf("\n");
+        }
+        printf("\n");
+    }
+
+    if (ne->entry_table_size > 0) {
+        const uint8 *ptr = exe + ne->entry_table_offset;
+        if (*ptr) {
+            printf("Entry table:\n");
+            uint32 ordinal = 1;
+            while (1) {
+                const uint8 bundled = *(ptr++);
+                if (!bundled) {
+                    break;
+                }
+
+                const uint8 bundletype = *(ptr++);
+                switch (bundletype) {
+                    case 0x00:  // unused entries, to skip ordinals.
+                        ordinal += bundled;
+                        break;
+
+                    case 0xFF: // Moveable segment entries.
+                        for (uint32 i = 0; i < bundled; i++, ordinal++) {
+                            const uint8 flags = *(ptr++);
+                            const uint16 int3f = *((const uint16 *) ptr); ptr += 2;
+                            const uint8 segment = *(ptr++);
+                            const uint16 offset = *((const uint16 *) ptr); ptr += 2;
+                            printf(" %u:\n", (uint) ordinal);
+                            printf("  Flags: MOVABLE");
+                            if (flags & 0x1) printf(" EXPORTED");
+                            if (flags & 0x2) printf(" GLOBAL");
+                            printf("\n");
+                            printf("  Int3f: %X\n", (uint) int3f);
+                            printf("  Segment: %u\n", (uint) segment);
+                            printf("  Offset: %u\n", (uint) offset);
+                        }
+                        break;
+
+                    default:
+                        for (uint32 i = 0; i < bundled; i++, ordinal++) {
+                            const uint8 flags = *(ptr++);
+                            const uint16 offset = *((const uint16 *) ptr); ptr += 2;
+                            printf(" %u:\n", (uint) ordinal);
+                            printf("  Flags: FIXED");
+                            if (flags & 0x1) printf(" EXPORTED");
+                            if (flags & 0x2) printf(" GLOBAL");
+                            printf("\n");
+                            printf("  Segment: %u\n", (uint) bundletype);
+                            printf("  Offset: %u\n", (uint) offset);
+                        }
+                        break;
+                }
+            }
+            printf("\n");
+        }
+    }
+
+    return 1;
+} // parseNeExe
+
+static void parseExe(const char *exefname, uint8 *exe, uint32 exelen)
+{
+    int is_lx = 0;
+
+    printf("%s\n", exefname);
+
+    const uint8 *origexe = exe;
+    if (!sanityCheckExe(&exe, &exelen, &is_lx))
+        return;
+
+    if (is_lx) {
+        parseLxExe(origexe, exe);
+    } else {
+        parseNeExe(origexe, exe);
+    }
 } // parseExe
 
 int main(int argc, char **argv)
