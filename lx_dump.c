@@ -608,8 +608,8 @@ static int parseNeExe(const uint8 *origexe, const uint8 *exe)
                     const uint8 srctype = *(fixupptr++);
                     const uint8 flags = *(fixupptr++);
                     uint32 srcchain_offset = (uint32) *((const uint16 *) fixupptr); fixupptr += 2;
-                    const int additive = (flags & 0x4);
-                    fixupptr += 4;  // !!! FIXME
+                    const uint8 *targetptr = fixupptr; fixupptr += 4;
+                    const int additive = (flags & 0x4) != 0;
                     printf("   %u:\n", (uint) j);
                     printf("    Source type: ");
                     switch (srctype & 0xF) {
@@ -620,14 +620,41 @@ static int parseNeExe(const uint8 *origexe, const uint8 *exe)
                         default: printf("[unknown type]"); break;
                     }
                     printf("\n");
-                    printf("    Flags:");
-                    switch (flags & 0x3) {
-                        case 0: printf(" INTERNALREF"); break;
-                        case 1: printf(" IMPORTORDINAL"); break;
-                        case 2: printf(" IMPORTNAME"); break;
-                        case 3: printf(" OSFIXUP"); break;
-                    }
+                    printf("    Fixup type:");
                     if (additive) printf(" ADDITIVE");
+                    switch (flags & 0x3) {
+                        case 0: {
+                            const uint8 segment = targetptr[0];
+                            //const uint8 reserved = targetptr[1];
+                            const uint16 offset = *((const uint16 *) &targetptr[2]);
+                            printf(" INTERNALREF (");
+                            if (segment == 0xFF)
+                                printf("movable segment, ordinal %u)", (uint) offset);
+                            else
+                                printf("segment %u, offset %u)", (uint) segment, (uint) offset);
+                        }
+                        break;
+
+                        case 1: {
+                            const uint16 module = ((const uint16 *) targetptr)[0];
+                            const uint16 ordinal = ((const uint16 *) targetptr)[1];
+                            printf(" IMPORTORDINAL (module %u, ordinal %u)", (uint) module, (uint) ordinal);
+                        }
+                        break;
+
+                        case 2: {
+                            const uint16 module = ((const uint16 *) targetptr)[0];
+                            const uint16 offset = ((const uint16 *) targetptr)[1];
+                            printf(" IMPORTNAME (module %u, name offset %u)", (uint) module, (uint) offset);
+                        }
+                        break;
+
+                        case 3: {
+                            const uint16 type = ((const uint16 *) targetptr)[0];
+                            printf(" OSFIXUP (type %u)", (uint) type);
+                        }
+                        break;
+                    }
                     printf("\n");
 
                     if (additive) {
