@@ -770,7 +770,7 @@ static int parseNeExe(const uint8 *origexe, const uint8 *exe)
             const uint8 *name = (exe + ne->imported_names_table_offset) + *ptr;
             const uint32 name_string_len = (uint32) *name;
             name++;
-            printf(" %u: ", (uint) i);
+            printf(" %u: ", (uint) i+1);
             for (uint32 j = 0; j < name_string_len; j++, name++) {
                 printf("%c", (int) *name);
             }
