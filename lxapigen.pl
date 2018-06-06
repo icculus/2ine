@@ -87,7 +87,8 @@ while (readdir(DIRH)) {
 
     # Here we go...
 
-    my $outfname = "$dirname/$module-lx.h";
+    my $finalfname = "$dirname/$module-lx.h";
+    my $outfname = "$finalfname-new";
     open(OUT, '>', $outfname) or die("Failed to open '$outfname' for writing: $!\n");
 
     print OUT <<EOF
@@ -227,6 +228,12 @@ EOF
 ;
 
     close(OUT);
+
+    if ((system("diff --brief '$finalfname' '$outfname'") == -1) || ($? != 0)) {
+        rename($outfname, $finalfname) or die("Failed to rename '$outfname' to '$finalfname': $!\n");
+    } else {
+        unlink($outfname);  # they match, just delete the new copy so build system doesn't rebuild everything.
+    }
 }
 
 closedir(DIRH);
