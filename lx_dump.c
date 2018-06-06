@@ -572,12 +572,12 @@ static int parseNeExe(const uint8 *origexe, const uint8 *exe)
     printf("Imported names table offset: %u\n", (uint) ne->imported_names_table_offset);
     printf("Non-resident name table offset: %u\n", (uint) ne->non_resident_name_table_offset);
     printf("Number of movable entries: %u\n", (uint) ne->num_movable_entries);
-    printf("Sector alignment shift count: %u (%u bytes)\n", (uint) ne->sector_alignment_shift_count, (uint) (1 << ne->sector_alignment_shift_count));
+    printf("Sector alignment shift count: %u\n", (uint) ne->sector_alignment_shift_count);
     printf("Number of resource entries: %u\n", (uint) ne->num_resource_entries);
     printf("Executable type: %u\n", (uint) ne->exe_type);
     printf("\n");
 
-    const uint32 sector_size = 1 << ne->sector_alignment_shift_count;
+    const uint32 sector_shift = ne->sector_alignment_shift_count;
 
     if (ne->num_segment_table_entries > 0) {
         const uint32 total = (uint32) ne->num_segment_table_entries;
@@ -589,7 +589,7 @@ static int parseNeExe(const uint8 *origexe, const uint8 *exe)
             if (seg->offset == 0) {
                 printf(" (no file data)\n");
             } else {
-                printf(" (byte position %u)\n", (uint) (seg->offset * sector_size));
+                printf(" (byte position %u)\n", (uint) (((uint32) seg->offset) << sector_shift));
             }
             printf("  Size: %u\n", (seg->size == 0) ? (uint) 0x10000 : (uint) seg->size);
             printf("  Segment flags:");
@@ -606,7 +606,7 @@ static int parseNeExe(const uint8 *origexe, const uint8 *exe)
             printf("  Minimum allocation: %u\n", (seg->minimum_allocation == 0) ? (uint) 0x10000 : (uint) seg->minimum_allocation);
 
             if (seg->segment_flags & 0x100) {  // has relocations (fixups)
-                const uint8 *segptr = origexe + (seg->offset * sector_size);
+                const uint8 *segptr = origexe + (((uint32) seg->offset) << sector_shift);
                 const uint8 *fixupptr = segptr + (seg->size ? seg->size : 0xFFFF);
                 const uint32 num_fixups = (uint32) *((const uint16 *) fixupptr); fixupptr += 2;
                 printf("  Fixup records (%u entries):\n", (uint) num_fixups);
@@ -668,7 +668,7 @@ static int parseNeExe(const uint8 *origexe, const uint8 *exe)
                     } else {
                         printf("    Source chain:");
                         do {
-                            printf(" %u", (uint) srcchain_offset);
+                            printf(" %X", (uint) srcchain_offset);
                             srcchain_offset = *((const uint16 *) (segptr + srcchain_offset));
                         } while (srcchain_offset < seg->size);
                     }

@@ -202,17 +202,28 @@ struct LxModule;
 typedef struct LxModule LxModule;
 struct LxModule
 {
-    LxHeader lx;
     uint32 refcount;
+    int is_lx;  // 1 if an LX module, 0 if NE.
+    union
+    {
+        LxHeader lx;
+        NeHeader ne;
+    } header;
+
     char name[256];  // !!! FIXME: allocate this.
+
     LxModule **dependencies;
+    uint32 num_dependencies;
+
     LxMmaps *mmaps;
+    uint32 num_mmaps;
 
     const LxExport *exports;
     uint32 num_exports;
     void *nativelib;
     uint32 eip;
     uint32 esp;
+    uint16 autodatasize;  // only used for NE binaries.
     int initialized;
     char *os2path;  // absolute path to module, in OS/2 format
     // !!! FIXME: put this elsewhere?

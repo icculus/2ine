@@ -164,8 +164,12 @@ static void initPib(void)
 
     len += 4;  // null terminators.
 
-    char *env = (char *) malloc(len);
-    if (!env) {
+    // align this to 64k, because it has to be at the start of a segment
+    //  for 16-bit code.
+    // !!! FIXME: ...which is to say: you can't have more than 64k
+    // !!! FIXME:  worth of environment and command line.
+    char *env = NULL;
+    if (posix_memalign((void **) &env, 0x10000, len) != 0) {
         fprintf(stderr, "Out of memory\n");
         abort();
     } // if
@@ -237,7 +241,7 @@ static void initPib(void)
     pib->pib_ulppid = (uint32) getppid();
     pib->pib_pchcmd = cmd;
     pib->pib_pchenv = env;
-    //pib->pib_hmte is filled in later during loadLxModule()
+    //pib->pib_hmte is filled in later during loadModule()
     // !!! FIXME: uint32 pib_flstatus;
     // !!! FIXME: uint32 pib_ultype;
 

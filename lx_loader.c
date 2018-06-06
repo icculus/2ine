@@ -30,51 +30,36 @@
 #include "lib2ine.h"
 
 // !!! FIXME: move this into an lx_common.c file.
-static int sanityCheckLxModule(uint8 **_exe, uint32 *_exelen)
+static int sanityCheckLxModule(const uint8 *exe, const uint32 exelen)
 {
-    if (*_exelen < 196) {
-        fprintf(stderr, "not an OS/2 LX module\n");
-        return 0;
-    }
-    const uint32 header_offset = *((uint32 *) (*_exe + 0x3C));
-    //printf("header offset is %u\n", (uint) header_offset);
-    if ((header_offset + sizeof (LxHeader)) >= *_exelen) {
-        fprintf(stderr, "not an OS/2 LX module\n");
+    if (sizeof (LxHeader) >= exelen) {
+        fprintf(stderr, "not an OS/2 EXE\n");
         return 0;
     }
 
-    *_exe += header_offset;  // skip the DOS stub, etc.
-    *_exelen -= header_offset;
-
-    const LxHeader *lx = (const LxHeader *) *_exe;
-
-    if ((lx->magic_l != 'L') || (lx->magic_x != 'X')) {
-        fprintf(stderr, "not an OS/2 LX module\n");
-        return 0;
-    }
-
+    const LxHeader *lx = (const LxHeader *) exe;
     if ((lx->byte_order != 0) || (lx->word_order != 0)) {
-        fprintf(stderr, "Program is not little-endian!\n");
+        fprintf(stderr, "Module is not little-endian!\n");
         return 0;
     }
 
     if (lx->lx_version != 0) {
-        fprintf(stderr, "Program is unknown LX module version (%u)\n", (uint) lx->lx_version);
+        fprintf(stderr, "Module is unknown LX version (%u)\n", (uint) lx->lx_version);
         return 0;
     }
 
     if (lx->cpu_type > 3) { // 1==286, 2==386, 3==486
-        fprintf(stderr, "Program needs unknown CPU type (%u)\n", (uint) lx->cpu_type);
+        fprintf(stderr, "Module needs unknown CPU type (%u)\n", (uint) lx->cpu_type);
         return 0;
     }
 
     if (lx->os_type != 1) { // 1==OS/2, others: dos4, windows, win386, unknown.
-        fprintf(stderr, "Program needs unknown OS type (%u)\n", (uint) lx->os_type);
+        fprintf(stderr, "Module needs unknown OS type (%u)\n", (uint) lx->os_type);
         return 0;
     }
 
     if (lx->page_size != 4096) {
-        fprintf(stderr, "Program page size isn't 4096 (%u)\n", (uint) lx->page_size);
+        fprintf(stderr, "Module page size isn't 4096 (%u)\n", (uint) lx->page_size);
         return 0;
     }
 
@@ -87,6 +72,49 @@ static int sanityCheckLxModule(uint8 **_exe, uint32 *_exelen)
 
     return 1;
 } // sanityCheckLxModule
+
+static int sanityCheckNeModule(const uint8 *exe, const uint32 exelen)
+{
+    if (sizeof (NeHeader) >= exelen) {
+        fprintf(stderr, "not an OS/2 EXE\n");
+        return 0;
+    }
+
+    const NeHeader *ne = (const NeHeader *) exe;
+    if (ne->exe_type != 1) {
+        fprintf(stderr, "Not an OS/2 NE module file (exe_type is %d, not 1)\n", (int) ne->exe_type);
+        return 0;
+    }
+
+    return 1;
+} // sanityCheckNeModule
+
+static int sanityCheckModule(uint8 **_exe, uint32 *_exelen, int *_is_lx)
+{
+    if (*_exelen < 62) {
+        fprintf(stderr, "not an OS/2 module\n");
+        return 0;
+    }
+    const uint32 header_offset = *((uint32 *) (*_exe + 0x3C));
+    //printf("header offset is %u\n", (uint) header_offset);
+
+    *_exe += header_offset;  // skip the DOS stub, etc.
+    *_exelen -= header_offset;
+
+    const uint8 *magic = *_exe;
+
+    if ((magic[0] == 'L') && (magic[1] == 'X')) {
+        *_is_lx = 1;
+        return sanityCheckLxModule(*_exe, *_exelen);
+    } else if ((magic[0] == 'N') && (magic[1] == 'E')) {
+        *_is_lx = 0;
+        return sanityCheckNeModule(*_exe, *_exelen);
+    }
+
+    fprintf(stderr, "not an OS/2 module\n");
+    return 0;
+} // sanityCheckModule
+
 
 static char *makeOS2Path(const char *fname)
 {
@@ -346,6 +374,11 @@ static int decompressIterated(uint8 *dst, uint32 dstlen, const uint8 *src, uint3
     return 1;
 } // decompressIterated
 
+static inline uint16 lxSelectorToSegment(const uint16 selector)
+{
+    return (selector << 3) | 7;
+} // lxSelectorToSegment
+
 // !!! FIXME: mutex this
 static int allocateSelector(const uint16 selector, const int pages, const uint32 addr, const unsigned int contents, const int is32bit)
 {
@@ -422,7 +455,7 @@ static int lxFindSelector(const uint32 _addr, uint16 *outselector, uint16 *outof
     //  change page permissions, we'll need to update the mapping and our state.
     for (LxModule *lxmod = GLoaderState.loaded_modules; (iscode == -1) && lxmod; lxmod = lxmod->next) {
         LxMmaps *mmaps = lxmod->mmaps;
-        for (uint32 i = 0; i < lxmod->lx.module_num_objects; i++, mmaps++) {
+        for (uint32 i = 0; i < lxmod->num_mmaps; i++, mmaps++) {
             const size_t lo = (size_t) mmaps->addr;
             const size_t hi = lo + mmaps->size;
             if ((addr >= lo) && (addr <= hi)) {
@@ -479,8 +512,8 @@ static void *lxConvert1616to32(const uint32 addr1616)
 
     const uint16 selector = (uint16) (addr1616 >> 19);  // slide segment down, and shift out control bits.
     const uint16 offset = (uint16) (addr1616 % 0x10000);  // all our LDT segments start at 64k boundaries (at the moment!).
-    assert(GLoaderState.ldt[selector] != 0);
     //printf("lxConvert1616to32: 0x%X -> %p\n", (uint) addr1616, (void *) (size_t) (GLoaderState.ldt[selector] + offset));
+    assert(GLoaderState.ldt[selector] != 0);
     return (void *) (size_t) (GLoaderState.ldt[selector] + offset);
 } // lxConvert1616to32
 
@@ -496,12 +529,14 @@ static uint32 lxConvert32to1616(void *addr32)
         return 0;  // oh well, crash, probably.
     } // if
 
-    //printf("selector: 0x%X\n", (uint) selector);
-    selector = (selector << 3) | 7;
-    //printf("shifted selector: 0x%X\n", (uint) selector);
-    return (((uint32)selector) << 16) | ((uint32) offset);
+    //printf("selector=0x%X, segment=0x%X\n", (uint) selector, (uint) lxSelectorToSegment(selector));
+    return (((uint32)lxSelectorToSegment(selector)) << 16) | ((uint32) offset);
 } // lxConvert32to1616
 
+static inline void *lxConvertSegmentOffsetto32(const uint16 seg, const uint16 off)
+{
+    return lxConvert1616to32((((uint32) seg) << 16) | ((uint32) off));
+} // lxConvertSegmentOffsetto32
 
 // EMX (and probably many other things) occasionally has to call a 16-bit
 //  system API, and assumes its stack is tiled in the LDT; it'll just shift
@@ -697,36 +732,49 @@ static void *generateMissingTrampoline(const char *_module, const char *_entry)
     return trampoline;
 } // generateMissingTrampoline
 
+
+static void *mmapSegment(uint16 *selector, const int iscode)
+{
+    // These are meant to be 64k segments mapped for use by 16-bit code, which means we
+    //  need them under 512 megabytes so their segments can convert directly to a linear
+    //  address with some bit twiddling.
+    static size_t baseaddr = 136 * 1024 * 1024;  // just start at a random low address that (hopefully) doesn't overlap anything.
+    const uint32 segmentsize = 0x10000;
+    void *segment = mmap((void *) baseaddr, segmentsize, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (segment == ((void *) MAP_FAILED)) {
+        FIXME("This could be more robust.");
+        fprintf(stderr, "Failed to mmap a 16-bit friendly memory segment.\n");
+        return NULL;
+    }
+
+    baseaddr += segmentsize;
+    uint16 offset = 0xFFFF;
+    *selector = 0xFFFF;
+    lxFindSelector((uint32) segment, selector, &offset, iscode);
+    assert(*selector != 0xFFFF);
+    assert(offset == 0);
+    return segment;
+} // mmapSegment
+
+
 static void *generateMissingTrampoline16(const char *_module, const char *_entry, const LxExport **_lxexp)
 {
-    static void *page = NULL;
-    static uint32 pageused = 0;
-    const uint32 pagesize = 0x10000;
+    static void *segment = NULL;
+    static uint32 segmentused = 0;
+    const uint32 segmentsize = 0x10000;
     static uint16 selector = 0xFFFF;
 
-    if ((!page) || ((pagesize - pageused) < 64))
+    if ((!segment) || ((segmentsize - segmentused) < 64))
     {
-        if (page)
-            mprotect(page, pagesize, PROT_READ | PROT_EXEC);
-        page = mmap(NULL, pagesize * 2, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        const size_t diff = (((size_t)page) % 0x10000);
-        if (diff) {  // align to 64k, unmap the difference.
-            void *origpage = page;
-            page = ((uint8 *) page) + (0x10000 - diff);
-            munmap(origpage, 0x10000 - diff);
-        } else {
-            munmap(((uint8 *)page) + 0x10000, 0x10000);  // unmap the extra half we didn't need.
-        } // else
-
-        pageused = 0;
-        uint16 offset = 0xFFFF;
-        selector = 0xFFFF;
-        lxFindSelector((uint32) page, &selector, &offset, 1);
+        if (segment)
+            mprotect(segment, segmentsize, PROT_READ | PROT_EXEC);
+        segment = mmapSegment(&selector, 1);
+        assert(segment != NULL);
         assert(selector != 0xFFFF);
-        assert(offset == 0);
+        segmentused = 0;
     } // if
 
-    void *trampoline = page + pageused;
+    void *trampoline = segment + segmentused;
     char *ptr = (char *) trampoline;
     char *module = strdup(_module);
     char *entry = strdup(_entry);
@@ -796,10 +844,10 @@ static void *generateMissingTrampoline16(const char *_module, const char *_entry
 
     const uint32 trampoline_len = (uint32) (ptr - ((char *) trampoline));
     assert(trampoline_len <= 64);
-    pageused += trampoline_len;
+    segmentused += trampoline_len;
 
-    if (pageused % 4)  // keep these aligned to 32 bits.
-        pageused += (4 - (pageused % 4));
+    if (segmentused % 4)  // keep these aligned to 32 bits.
+        segmentused += (4 - (segmentused % 4));
 
     //printf("Generated trampoline %p for module '%s' 16-bit export '%s'\n", trampoline, module, entry);
 
@@ -808,7 +856,7 @@ static void *generateMissingTrampoline16(const char *_module, const char *_entry
     static LxMmaps lxmmap;
     lxexp.addr = trampoline;
     lxexp.object = &lxmmap;
-    lxmmap.mapped = lxmmap.addr = page;
+    lxmmap.mapped = lxmmap.addr = segment;
     lxmmap.size = 0x10000;
     lxmmap.alias = selector;
     *_lxexp = &lxexp;
@@ -857,6 +905,124 @@ static __attribute__((noreturn)) void runLxModule(LxModule *lxmod)
 
     __builtin_unreachable();
 } // runLxModule
+
+static __attribute__((noreturn)) void runNeModule(LxModule *lxmod)
+{
+    //fprintf(stderr, "jumping into NE land for exe '%s'...! cs:ip=%X:%X (%p) ss:sp=%X:%X (%p)\n", lxmod->name, (uint) (lxmod->eip >> 16), (uint) (lxmod->eip & 0xFFFF), lxConvert1616to32(lxmod->eip), (uint) (lxmod->esp >> 16), (uint) (lxmod->esp & 0xFFFF), lxConvert1616to32(lxmod->esp)); fflush(stderr);
+
+    GLoaderState.running = 1;
+
+    // According to https://github.com/open-watcom/open-watcom-v2/blob/master/bld/clib/startup/c/maino16.c ,
+    //  The stack at startup should have, pushed in this order: cmdline offset, env segment, far* to top of stack, far* to bottom of stack.
+    // Microsoft C 5.1 wants things in registers (maybe Watcom does too, elsewhere, and I'm reading it wrong?),
+    //  so we do both.
+    const uint16 stacksize = lxmod->header.ne.stack_size ? lxmod->header.ne.stack_size : 0x10000;
+    const uint16 ss = (lxmod->esp >> 16) & 0xFFFF;  // stack segment
+    const uint32 env1616 = lxConvert32to1616(GLoaderState.pib.pib_pchenv);  // this is meant to be aligned to a segment.
+    const uint16 cmdlineoffset = env1616 & 0xFFFF;
+    const uint16 envseg = (env1616 >> 16) & 0xFFFF;
+
+    uint8 *stack = (uint8 *) lxConvert1616to32(lxmod->esp);
+    //printf("stack is at 32=%p 16=%x:%x\n", stack, (uint) ss, (uint) (lxmod->esp & 0xFFFF));
+    stack -= 2; *((uint16 *) stack) = cmdlineoffset;  // cmdline offset
+    stack -= 2; *((uint16 *) stack) = envseg;  // env segment
+    stack -= 2; *((uint16 *) stack) = lxmod->esp & 0xFFFF;  // top of stack
+    stack -= 2; *((uint16 *) stack) = ss;
+    stack -= 2; *((uint16 *) stack) = (lxmod->esp & 0xFFFF) - stacksize;  // bottom of stack
+    stack -= 2; *((uint16 *) stack) = ss;  // bottom of stack
+
+    uint16 selector = 0xFFFF;
+    void *segment = mmapSegment(&selector, 1);
+    assert(segment != NULL);
+    assert(selector != 0xFFFF);
+    char *ptr = (char *) segment;
+
+/*
+; instructions are in Intel syntax here, not AT&T.
+USE32
+JMP WORD 0xAAAA:0xBBBB  ; jump into 16-bit land (the next instruction!).
+
+USE16
+MOV AX,0x1111     ; set stack segment
+MOV SS,AX
+MOV SP,0x2222     ; set stack pointer
+MOV AX,0x3333     ; set data segment
+MOV DS,AX
+XOR AX,AX         ; set extra segment to zero.
+MOV ES,AX
+MOV AX,0x4444     ; AX=env segment
+MOV BX,0x5555     ; BX=cmdline offset
+MOV CX,0x6666     ; CX=size of auto data segment
+XOR DX,DX         ; clear remaining general registers.
+XOR SI,SI
+XOR DI,DI
+XOR BP,BP
+JMP 0x6666:0x7777 ; jump into actual 16-bit entry point.
+INT 0x3           ; if it returns here, crash and burn.
+*/
+
+    // USE32
+    *(ptr++) = 0x66;  /* jmp word 0xaaaa:0xbbbb... */
+    *(ptr++) = 0xEA;  /*  ...jmp word 0xaaaa:0xbbbb */
+    const uint16 jmp16offset = 6;
+    memcpy(ptr, &jmp16offset, 2); ptr += 2;
+    const uint16 jmp16segment = lxSelectorToSegment(selector);
+    memcpy(ptr, &jmp16segment, 2); ptr += 2;
+
+    // USE16
+    *(ptr++) = 0xB8;  /* mov ax,0x1111... */
+    memcpy(ptr, &ss, 2); ptr += 2;
+    *(ptr++) = 0x8E;  /* mov ss,ax... */
+    *(ptr++) = 0xD0;  /*  ...mov ss,ax */
+    *(ptr++) = 0xBC;  /* mov sp,0x2222... */
+    const uint16 sp = (uint16) (((size_t) stack) & 0xFFFF);  // top of stack offset
+    memcpy(ptr, &sp, 2); ptr += 2;
+    *(ptr++) = 0xB8;  /* mov ax,0x3333... */
+    const uint16 ds = lxmod->header.ne.auto_data_segment ? lxSelectorToSegment(lxmod->mmaps[lxmod->header.ne.auto_data_segment-1].alias) : ss;  // data segment
+    memcpy(ptr, &ds, 2); ptr += 2;
+    *(ptr++) = 0x8E;  /* mov ds,ax... */
+    *(ptr++) = 0xD8;  /*  ...mov ds,ax */
+    *(ptr++) = 0x31;  /* xor ax,ax... */
+    *(ptr++) = 0xC0;  /*  ...xor ax,ax */
+    *(ptr++) = 0x8E;  /* mov es,ax... */
+    *(ptr++) = 0xC0;  /*  ...mov es,ax */
+    *(ptr++) = 0xB8;  /* mov ax,0x4444... */
+    memcpy(ptr, &envseg, 2); ptr += 2;
+    *(ptr++) = 0xBB;  /* mov bx,0x5555... */
+    memcpy(ptr, &cmdlineoffset, 2); ptr += 2;
+    *(ptr++) = 0xB9;  /* mov cx,0x6666... */
+    const uint16 autodatasize = lxmod->autodatasize;
+    memcpy(ptr, &autodatasize, 2); ptr += 2;
+    *(ptr++) = 0x31;  /* xor dx,dx... */
+    *(ptr++) = 0xD2;  /*  ...xor dx,dx */
+    *(ptr++) = 0x31;  /* xor si,si... */
+    *(ptr++) = 0xF6;  /*  ...xor si,si */
+    *(ptr++) = 0x31;  /* xor di,di... */
+    *(ptr++) = 0xFF;  /*  ...xor di,di */
+    *(ptr++) = 0x31;  /* xor bp,bp... */
+    *(ptr++) = 0xED;  /*  ...xor bp,bp */
+    *(ptr++) = 0xEA;  /* jmp 0x6666:0x7777... */
+    const uint16 ip = (uint16) (lxmod->eip & 0xFFFF);
+    memcpy(ptr, &ip, 2); ptr += 2;
+    const uint16 cs = (uint16) ((lxmod->eip >> 16) & 0xFFFF);
+    memcpy(ptr, &cs, 2); ptr += 2;
+    *(ptr++) = 0xCD;  /* int 0x3... */
+    *(ptr++) = 0x03;  /*  ...int 0x3 */
+
+    __asm__ __volatile__("jmp *%%eax\n\t" : /* no outputs */ : "a" (segment) : "memory");
+
+    __builtin_unreachable();
+} // runLxModule
+
+static __attribute__((noreturn)) void runModule(LxModule *lxmod)
+{
+    if (lxmod->is_lx) {
+        runLxModule(lxmod);
+    } else {
+        runNeModule(lxmod);
+    }
+    __builtin_unreachable();
+} // runModule
 
 static void runLxLibraryInitOrTerm(LxModule *lxmod, const int isTermination)
 {
@@ -916,7 +1082,7 @@ static void runLxLibraryInit(LxModule *lxmod)
     //  bridge when we come to it, I guess. Either way: this is running here,
     //  flag or not.
     if (1) { //if (lxmod->module_flags & 0x4) {  // LIBINIT flag
-        if (lxmod->lx.eip_object != 0)
+        if (lxmod->header.lx.eip_object != 0)
             runLxLibraryInitOrTerm(lxmod, 0);
     } // if
 } // runLxLibraryInit
@@ -926,17 +1092,36 @@ static void runLxLibraryTerm(LxModule *lxmod)
     // See notes about global initialization in runLxLibraryInit(); it
     //  applies to deinit here, too.
     if (1) { //if (lxmod->module_flags & 0x40000000) {  // LIBTERM flag
-        if (lxmod->lx.eip_object != 0)
+        if (lxmod->header.lx.eip_object != 0)
             runLxLibraryInitOrTerm(lxmod, 1);
     } // if
 } // runLxLibraryTerm
+
+static void runNeLibraryInit(LxModule *lxmod)
+{
+    FIXME("write me");
+} // runNeLibraryInit
+
+static void runNeLibraryTerm(LxModule *lxmod)
+{
+    FIXME("write me");
+} // runNeLibraryTerm
+
+static void runLibraryTerm(LxModule *lxmod)
+{
+    if (lxmod->is_lx) {
+        runLxLibraryTerm(lxmod);
+    } else {
+        runNeLibraryTerm(lxmod);
+    }
+} // runLibraryTerm
 
 static void freeLxModule(LxModule *lxmod)
 {
     if (!lxmod)
         return;
 
-    //printf("freeing %s module '%s' (starting refcount=%d) ...\n", lxmod->nativelib ? "native" : "LX", lxmod->name, (int) lxmod->refcount); fflush(stdout);
+    //printf("freeing %s module '%s' (starting refcount=%d) ...\n", lxmod->nativelib ? "native" : lxmod->is_lx ? "LX" : "NE", lxmod->name, (int) lxmod->refcount); fflush(stdout);
 
     // !!! FIXME: mutex from here
     lxmod->refcount--;
@@ -946,7 +1131,7 @@ static void freeLxModule(LxModule *lxmod)
 
     if ((lxmod->initialized) && (lxmod != GLoaderState.main_module)) {
         if (!lxmod->nativelib) {
-            runLxLibraryTerm(lxmod);
+            runLibraryTerm(lxmod);
         } else {
             LxNativeModuleDeinitEntryPoint fn = (LxNativeModuleDeinitEntryPoint) dlsym(lxmod->nativelib, "lxNativeModuleDeinit");
             if (fn)
@@ -965,18 +1150,21 @@ static void freeLxModule(LxModule *lxmod)
 
     if (GLoaderState.main_module == lxmod) {
         GLoaderState.main_module = NULL;
-        LxMmaps *lxmmap = &lxmod->mmaps[lxmod->lx.esp_object - 1];
+        LxMmaps *lxmmap = lxmod->is_lx ?
+            &lxmod->mmaps[lxmod->header.lx.esp_object - 1] :
+            &lxmod->mmaps[lxmod->header.ne.reg_ss - 1];
         const uint32 stackbase = (uint32) ((size_t)lxmmap->addr);
         initOs2StackSegments(stackbase, lxmmap->size, 1);
         lxmmap->mapped = NULL;  // don't unmap the stack we're probably using!
     } // if
     // !!! FIXME: mutex to here
 
-    for (uint32 i = lxmod->lx.num_import_mod_entries; i > 0; i--)
+    for (uint32 i = lxmod->num_dependencies; i > 0; i--) {
         freeLxModule(lxmod->dependencies[i-1]);
+    } // for
     free(lxmod->dependencies);
 
-    for (uint32 i = 0; i < lxmod->lx.module_num_objects; i++) {
+    for (uint32 i = 0; i < lxmod->num_mmaps; i++) {
         if (lxmod->mmaps[i].alias != 0xFFFF)
             lxFreeSelector(lxmod->mmaps[i].alias);
         if (lxmod->mmaps[i].mapped)
@@ -996,7 +1184,7 @@ static void freeLxModule(LxModule *lxmod)
     free(lxmod);
 } // freeLxModule
 
-static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int dependency_tree_depth);
+static LxModule *loadModuleByModuleNameInternal(const char *modname, const int dependency_tree_depth);
 
 static void *getModuleProcAddrByOrdinal(const LxModule *module, const uint32 ordinal, const LxExport **_lxexp, const int want16bit)
 {
@@ -1082,7 +1270,8 @@ static void doFixup(uint8 *page, const sint16 offset, const uint32 finalval, con
 
 static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntry *obj, const uint32 pagenum, uint8 *page)
 {
-    const LxHeader *lx = &lxmod->lx;
+    assert(lxmod->is_lx);  // this should only be called from the LX loader.
+    const LxHeader *lx = &lxmod->header.lx;
 //const LxObjectTableEntry *origobj = ((const LxObjectTableEntry *) (exe + lx->object_table_offset));
     const uint32 *fixuppage = (((const uint32 *) (exe + lx->fixup_page_table_offset)) + ((obj->page_table_index - 1) + pagenum));
     const uint32 fixupoffset = *fixuppage;
@@ -1167,11 +1356,11 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
                     if (lxmod->mmaps[objectid - 1].alias == 0xFFFF) {
                         fprintf(stderr, "uhoh, need a 16-bit alias fixup, but object has no 16:16 alias!\n");
                     } else {
-                        const uint16 selector = (lxmod->mmaps[objectid - 1].alias << 3) | 7;
+                        const uint16 segment = lxSelectorToSegment(lxmod->mmaps[objectid - 1].alias);
                         switch (srctype & 0xF) {
-                            case 0x2: finalval = selector; break; // 16-bit selector fixup?
-                            case 0x3: finalval = (((uint32) selector) << 16) | targetoffset; break; // 16:16 pointer fixup
-                            case 0x6: finalval = targetoffset; finalval2 = selector; break; // 16:32 pointer fixup
+                            case 0x2: finalval = segment; break; // 16-bit selector fixup?
+                            case 0x3: finalval = (((uint32) segment) << 16) | targetoffset; break; // 16:16 pointer fixup
+                            case 0x6: finalval = targetoffset; finalval2 = segment; break; // 16:32 pointer fixup
                             default: assert(!"shouldn't hit this code"); break;
                         } // switch
                     } // else
@@ -1210,11 +1399,11 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
                     if (!lxexp || !lxexp->object || (lxexp->object->alias == 0xFFFF)) {
                         fprintf(stderr, "uhoh, couldn't find a selector for a fixup-to-alias address!\n");
                     } else {
-                        const uint16 selector = (lxexp->object->alias << 3) | 7;
+                        const uint16 segment = lxSelectorToSegment(lxexp->object->alias);
                         switch (srctype & 0xF) {
-                            case 0x2: finalval = selector; break; // 16-bit selector fixup?  !!! FIXME:
-                            case 0x3: finalval = (((uint32) selector) << 16) | (finalval - ((uint32)lxexp->object->addr)); break; // 16:16 pointer fixup
-                            case 0x6: finalval -= ((uint32)lxexp->object->addr); finalval2 = selector; break; // 16:32 pointer fixup
+                            case 0x2: finalval = segment; break; // 16-bit selector fixup?  !!! FIXME:
+                            case 0x3: finalval = (((uint32) segment) << 16) | (finalval - ((uint32)lxexp->object->addr)); break; // 16:16 pointer fixup
+                            case 0x6: finalval -= ((uint32)lxexp->object->addr); finalval2 = segment; break; // 16:32 pointer fixup
                             default: assert(!"shouldn't hit this code"); break;
                         } // switch
                     } // else
@@ -1256,11 +1445,11 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
                     if (!lxexp || !lxexp->object || (lxexp->object->alias == 0xFFFF)) {
                         fprintf(stderr, "uhoh, couldn't find a selector for a fixup-to-alias address!\n");
                     } else {
-                        const uint16 selector = (lxexp->object->alias << 3) | 7;
+                        const uint16 segment = lxSelectorToSegment(lxexp->object->alias);
                         switch (srctype & 0xF) {
-                            case 0x2: finalval = selector; break; // 16-bit selector fixup?  !!! FIXME:
-                            case 0x3: finalval = (((uint32) selector) << 16) | (finalval - ((uint32)lxexp->object->addr)); break; // 16:16 pointer fixup
-                            case 0x6: finalval -= ((uint32)lxexp->object->addr); finalval2 = selector; break; // 16:32 pointer fixup
+                            case 0x2: finalval = segment; break; // 16-bit selector fixup?  !!! FIXME:
+                            case 0x3: finalval = (((uint32) segment) << 16) | (finalval - ((uint32)lxexp->object->addr)); break; // 16:16 pointer fixup
+                            case 0x6: finalval -= ((uint32)lxexp->object->addr); finalval2 = segment; break; // 16:32 pointer fixup
                             default: assert(!"shouldn't hit this code"); break;
                         } // switch
                     } // else
@@ -1384,22 +1573,18 @@ static void fixupLinearCodeSegmentReferences(uint8 *addr, size_t size)
     } // while
 } // fixupLinearCodeSegmentReferences
 
+/* LX ("Linear Executable") modules are 32-bit binaries that can contain 16-bit segments. */
 // !!! FIXME: break up this function.
-static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int dependency_tree_depth)
+static LxModule *loadLxModule(const char *fname, const uint8 *origexe, uint8 *exe, uint32 exelen, int dependency_tree_depth)
 {
-    //printf("loadLxModule('%s')\n", fname); fflush(stdout);
-    LxModule *retval = NULL;
-    const uint8 *origexe = exe;
-    //const uint32 origexelen = exelen;
-
-    if (!sanityCheckLxModule(&exe, &exelen))
-        goto loadlx_failed;
-
     const LxHeader *lx = (const LxHeader *) exe;
     const uint32 module_type = lx->module_flags & 0x00038000;
 
     if ((module_type != 0x0000) && (module_type != 0x8000)) {
         fprintf(stderr, "This is not a standard .exe or .dll (maybe device driver?)\n");
+        goto loadlx_failed;
+    } else if (lx->module_flags & 0x2000) {
+        fprintf(stderr, "This module is marked as not loadable.\n");
         goto loadlx_failed;
     } // if
 
@@ -1413,12 +1598,13 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
         goto loadlx_failed;
     } // if else if
 
-    retval = (LxModule *) malloc(sizeof (LxModule));
+    LxModule *retval = (LxModule *) malloc(sizeof (LxModule));
     if (!retval) {
         fprintf(stderr, "Out of memory!\n");
         goto loadlx_failed;
     } // if
     memset(retval, '\0', sizeof (*retval));
+    retval->is_lx = 1;
     retval->refcount = 1;
     retval->dependencies = (LxModule **) malloc(sizeof (LxModule *) * lx->num_import_mod_entries);
     retval->mmaps = (LxMmaps *) malloc(sizeof (LxMmaps) * lx->module_num_objects);
@@ -1428,10 +1614,12 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
     } // if
     memset(retval->dependencies, '\0', sizeof (LxModule *) * lx->num_import_mod_entries);
     memset(retval->mmaps, '\0', sizeof (LxMmaps) * lx->module_num_objects);
-    for (int i = 0; i < lx->module_num_objects; i++)
+    retval->num_dependencies = lx->num_import_mod_entries;
+    retval->num_mmaps = lx->module_num_objects;
+    for (int i = 0; i < retval->num_mmaps; i++)
         retval->mmaps[i].alias = 0xFFFF;
 
-    memcpy(&retval->lx, lx, sizeof (*lx));
+    memcpy(&retval->header.lx, lx, sizeof (*lx));
 
     if (lx->resident_name_table_offset) {
         const uint8 *name_table = exe + lx->resident_name_table_offset;
@@ -1509,6 +1697,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
             mmapaddr = (void *) adjust;
         } // if
 
+        FIXME("Can we just unmap the adjusted pieces?");  // instead of keeping an extra pointer and wasted space...
         retval->mmaps[i].addr = mmapaddr;
 
         const LxObjectPageTableEntry *objpage = ((const LxObjectPageTableEntry *) (exe + lx->object_page_table_offset));
@@ -1705,7 +1894,7 @@ static LxModule *loadLxModule(const char *fname, uint8 *exe, uint32 exelen, int 
         memcpy(name, import_modules_table, namelen);
         import_modules_table += namelen;
         name[namelen] = '\0';
-        retval->dependencies[i] = loadLxModuleByModuleNameInternal(name, dependency_tree_depth);
+        retval->dependencies[i] = loadModuleByModuleNameInternal(name, dependency_tree_depth);
         if (!retval->dependencies[i]) {
             fprintf(stderr, "Failed to load dependency '%s' for module '%s'\n", name, modname);
             goto loadlx_failed;
@@ -1789,7 +1978,432 @@ loadlx_failed:
     return NULL;
 } // loadLxModule
 
-static LxModule *loadLxModuleByPathInternal(const char *fname, const int dependency_tree_depth)
+
+static int fixupNeSegment(const NeSegmentTableEntry *seg, LxModule *lxmod, uint8 *dst, const uint32 sector_shift, const uint8 *origexe, uint8 *exe, uint32 exelen)
+{
+    assert(!lxmod->is_lx);  // this should only be called from the NE loader.
+
+    if ((seg->segment_flags & 0x100) == 0) {
+        return 1;  // no fixups here.
+    } // if
+
+    const uint8 *segptr = origexe + (seg->offset << sector_shift);
+    const uint8 *fixupptr = segptr + (seg->size ? seg->size : 0xFFFF);
+    const uint32 num_fixups = (uint32) *((const uint16 *) fixupptr); fixupptr += 2;
+
+    for (uint32 i = 0; i < num_fixups; i++) {
+        const uint8 srctype = *(fixupptr++);
+        const uint8 flags = *(fixupptr++);
+        uint32 srcchain_offset = (uint32) *((const uint16 *) fixupptr); fixupptr += 2;
+        const uint8 *targetptr = fixupptr; fixupptr += 4;
+        const int additive = (flags & 0x4) != 0;
+        // confusingly, what we write to is the "source" and where we read from is the "target."
+        uint32 target = 0;
+
+        switch (flags & 0x3) {
+            case 0: { // INTERNALREF
+                const LxExport *lxexp = NULL;
+                const uint8 segment = targetptr[0];
+                //const uint8 reserved = targetptr[1];
+                const uint16 offset = *((const uint16 *) &targetptr[2]);
+                if (segment == 0xFF) {  // this is like IMPORTORDINAL with ourselves as the module.
+                    void *addr = getModuleProcAddrByOrdinal(lxmod, offset, &lxexp, 1);
+                    if (addr) {
+                        target = lxConvert32to1616(addr);
+                    }
+                } else {
+                    target = (lxSelectorToSegment(lxmod->mmaps[segment-1].alias) << 16) | offset;
+                }
+            }
+            break;
+
+            case 1: { // IMPORTORDINAL
+                const uint16 module = ((const uint16 *) targetptr)[0];
+                const uint16 ordinal = ((const uint16 *) targetptr)[1];
+                const LxExport *lxexp = NULL;
+                void *addr = getModuleProcAddrByOrdinal(lxmod->dependencies[module-1], ordinal, &lxexp, 1);
+                if (addr) {
+                    target = lxConvert32to1616(addr);
+                }
+            }
+            break;
+
+            case 2: { // IMPORTNAME
+                const uint16 module = ((const uint16 *) targetptr)[0];
+                const uint16 offset = ((const uint16 *) targetptr)[1];
+                const LxExport *lxexp = NULL;
+                const uint8 *import_name = (exe + lxmod->header.ne.imported_names_table_offset) + offset;
+                char name[256];
+                const uint8 namelen = *(import_name++);
+                memcpy(name, import_name, namelen);
+                name[namelen] = '\0';
+                void *addr = getModuleProcAddrByName(lxmod->dependencies[module-1], name, &lxexp, 1);
+                if (addr) {
+                    target = lxConvert32to1616(addr);
+                }
+            }
+            break;
+
+            case 3: {
+                //const uint16 type = ((const uint16 *) targetptr)[0];
+                // I think these are for FPU emulation, but we don't care in modern times.
+                continue;  // just skip this fixup.
+            }
+            break;
+
+            default:
+                fprintf(stderr, "unknown fixup target type %u\n", (uint) (flags & 0x3));
+                break;
+        } // switch
+
+        if (additive) {
+            uint16 *source = (uint16 *) (dst + srcchain_offset);
+            switch (srctype & 0xF) {
+                case 0: *((uint8 *) source) += target & 0xFF; break; // LOBYTE
+                case 2: *source += target >> 16; break; // SEGMENT
+                case 3: source[0] += target & 0xFFFF; source[1] += target >> 16; break; // FAR_ADDR  ... this adds to the offset, not segment.
+                case 5: *source += target & 0xFFFF; break; // OFFSET
+                default: fprintf(stderr, "unknown fixup type %u\n", (uint) (srctype & 0xF)); break;
+            } // switch
+        } else {
+            while (srcchain_offset < seg->size) {  // strictly, this should end with 0xFFFF, but we drop out for any out-of-bounds index.
+                uint16 *source = (uint16 *) (dst + srcchain_offset);
+                srcchain_offset = *source;
+                switch (srctype & 0xF) {
+                    case 0: *((uint8 *) source) = target & 0xFF; break; // LOBYTE
+                    case 2: *source = target >> 16; break; // SEGMENT
+                    case 3: source[0] = target & 0xFFFF; source[1] = target >> 16; break; // FAR_ADDR
+                    case 5: *source = target & 0xFFFF; break; // OFFSET
+                    default: fprintf(stderr, "unknown fixup type %u\n", (uint) (srctype & 0xF)); break;
+                } // switch
+            } // while
+        } // else
+    } // for
+
+    return 1;
+} // fixupNeSegment
+
+// !!! FIXME: this code isn't _exactly_ like the LX loader, but it's close enough that there's a _ton_ of copy/paste.
+// NE ("New Executable") modules are 16-bit binaries.
+static LxModule *loadNeModule(const char *fname, const uint8 *origexe, uint8 *exe, uint32 exelen, int dependency_tree_depth)
+{
+    FIXME("All of this needs bounds checking and corruption testing");
+    const NeHeader *ne = (const NeHeader *) exe;
+    const uint16 module_type = ne->module_flags & 0x8000;
+
+    if (ne->module_flags & 0x2000) {  // NOTLOADABLE
+        fprintf(stderr, "This module is marked as not loadable.\n");
+        goto loadne_failed;
+    } // if
+
+    const int isDLL = (module_type == 0x8000);
+
+    if (isDLL && !GLoaderState.main_module) {
+        fprintf(stderr, "uhoh, need to load an .exe before a .dll!\n");
+        goto loadne_failed;
+    } else if (!isDLL && GLoaderState.main_module) {
+        fprintf(stderr, "uhoh, loading an .exe after already loading one!\n");
+        goto loadne_failed;
+    }
+
+    // we load an "LxModule" even for NE binaries. Sorry!!
+    LxModule *retval = (LxModule *) malloc(sizeof (LxModule));
+    if (!retval) {
+        fprintf(stderr, "Out of memory!\n");
+        goto loadne_failed;
+    } // if
+    memset(retval, '\0', sizeof (*retval));
+    retval->is_lx = 0;
+    retval->refcount = 1;
+    retval->dependencies = (LxModule **) malloc(sizeof (LxModule *) * ne->num_module_ref_table_entries);
+    retval->mmaps = (LxMmaps *) malloc(sizeof (LxMmaps) * ne->num_segment_table_entries);
+    if (!retval->dependencies || !retval->mmaps) {
+        fprintf(stderr, "Out of memory!\n");
+        goto loadne_failed;
+    } // if
+    memset(retval->dependencies, '\0', sizeof (LxModule *) * ne->num_module_ref_table_entries);
+    memset(retval->mmaps, '\0', sizeof (LxMmaps) * ne->num_segment_table_entries);
+    retval->num_dependencies = ne->num_module_ref_table_entries;
+    retval->num_mmaps = ne->num_segment_table_entries;
+    for (int i = 0; i < retval->num_mmaps; i++)
+        retval->mmaps[i].alias = 0xFFFF;
+
+    memcpy(&retval->header.ne, ne, sizeof (*ne));
+
+    if (ne->resident_name_table_offset) {
+        const uint8 *name_table = exe + ne->resident_name_table_offset;
+        const uint8 namelen = *(name_table++);
+        char *ptr = retval->name;
+        for (uint32 i = 0; i < namelen; i++) {
+            const char ch = *(name_table++);
+            *(ptr++) = ((ch >= 'a') && (ch <= 'z')) ? (ch + ('A' - 'a')) : ch;
+        } // for
+        *ptr = '\0';
+    } // if
+
+    if (!isDLL) {
+        GLoaderState.main_module = retval;
+        GLoaderState.pib.pib_hmte = retval;
+    } // else if
+
+    const char *modname = retval->name;
+    //printf("ref'd new module '%s' to %u\n", modname, 1);
+
+    // !!! FIXME: apparently OS/2 does 1024, but they're not loading the module into RAM each time.
+    // !!! FIXME: the spec mentions the 1024 thing for "forwarder" records in the entry table,
+    // !!! FIXME:  specifically. _Can_ two DLLs depend on each other? We'll have to load both and
+    // !!! FIXME:  then fix them up without recursing.
+    if (++dependency_tree_depth > 32) {
+        fprintf(stderr, "Likely circular dependency in module '%s'\n", modname);
+        goto loadne_failed;
+    } // if
+
+    if ((!ne->reg_ss) || (ne->reg_ss > ne->num_segment_table_entries)) {
+        fprintf(stderr, "Bogus reg_ss in module '%s'\n", modname);
+        goto loadne_failed;
+    }
+
+    FIXME("What do we do if ne->NOAUTODATA doesn't agree with ne->auto_data_segment?");
+    const NeSegmentTableEntry *seg = (const NeSegmentTableEntry *) (exe + ne->segment_table_offset);
+    const NeSegmentTableEntry *autodataseg = ne->auto_data_segment ? (seg + ne->auto_data_segment) : NULL;
+    if (autodataseg) {
+        retval->autodatasize = autodataseg->size;
+    }
+
+    for (uint32 i = 0; i < ne->num_segment_table_entries; i++, seg++) {
+        // for 16-bit binaries, we just allocate entire 64k segments regardless of
+        //  what the segment table entry asks for; it's not like it's a big expense in
+        //  modern times.
+        const uint32 vsize = 0x10000;
+        // currently we ignore the movable flag, since we just allocate whatever, whereever, but if we _need_ specific segments, we'll have to revisit this.
+        //const int movable = (seg->segment_flags & 0x10) != 0;
+        const int iscode = ((seg->segment_flags & 0x7) == 0) ? 1 : 0;
+        uint16 selector = 0xFFFF;
+        void *mmapaddr = mmapSegment(&selector, iscode);
+        //printf("%s neobj #%u mmapSegment(%d) == %p (selector=0x%X)\n", retval->name, (uint) i, iscode, mmapaddr, (uint) selector);
+
+        if (mmapaddr == NULL) {
+            fprintf(stderr, "mmapSegment(%d) failed\n", iscode);
+            goto loadne_failed;
+        } else if (selector == 0xFFFF) {
+            munmap(mmapaddr, vsize);
+            mmapaddr = NULL;
+            fprintf(stderr, "Failed to get a selector for a segment\n");
+            goto loadne_failed;
+        }
+
+        retval->mmaps[i].mapped = mmapaddr;
+        retval->mmaps[i].size = vsize;
+        retval->mmaps[i].addr = mmapaddr;
+        retval->mmaps[i].alias = selector;
+
+        uint8 *dst = (uint8 *) mmapaddr;
+        const size_t segfiledataoffset = seg->offset;
+        const size_t segfiledatalen = seg->size ? seg->size : 0x10000;
+        assert(segfiledatalen <= vsize);
+        size_t leftover = vsize;
+        if (segfiledataoffset) {
+            memcpy(dst, origexe + (segfiledataoffset << ne->sector_alignment_shift_count), segfiledatalen);
+            char fname[16]; snprintf(fname, sizeof (fname), "seg%d.bin", (int) i+1); FILE *io = fopen(fname, "wb"); if (io) { fwrite(dst, segfiledatalen, 1, io); fclose(io); }
+            leftover -= segfiledatalen;
+            dst += segfiledatalen;
+        }
+        if (leftover) {
+            memset(dst, '\0', leftover);
+        }
+    } // for
+
+    // All the pages we need from the EXE are loaded into the appropriate spots in memory.
+    //printf("mmap()'d everything we need!\n");
+
+    retval->eip = (lxSelectorToSegment(retval->mmaps[ne->reg_cs-1].alias) << 16) | ne->reg_ip;
+
+    if (!isDLL) {
+        FIXME("ne->stack_size can be zero if there's a separate stack segment defined"); assert(ne->stack_size != 0);
+
+        /* "If SS equals the automatic data segment and SP equals
+            zero, the stack pointer is set to the top of the automatic data
+            segment just below the additional heap area." */
+        uint16 sp = ne->reg_sp;
+        if ((ne->reg_ss == ne->auto_data_segment) && (sp == 0)) {
+            if (!autodataseg) {
+                goto loadne_failed;
+            }
+            sp = autodataseg->size + ne->stack_size;
+        }
+        retval->esp = (lxSelectorToSegment(retval->mmaps[ne->reg_ss-1].alias) << 16) | (sp ? sp : 0xFFFF);
+
+        // This needs to be set up now, so it's available to any library
+        //  init code that runs in LX land.
+        void *topofstack = (void *) (((size_t) retval->mmaps[ne->reg_ss].addr) + sp);
+        GLoaderState.initOs2Tib(GLoaderState.main_tibspace, topofstack, ne->stack_size, 0);
+        GLoaderState.main_tib_selector = GLoaderState.setOs2Tib(GLoaderState.main_tibspace);
+    } // if
+
+    // Set up our exports...
+    if (ne->entry_table_size > 0) {
+        uint32 total_ordinals = 0;
+        const uint8 *entryptr = exe + ne->entry_table_offset;
+        while (*entryptr) {  /* end field has a value of zero. */
+            const uint8 numentries = *(entryptr++);  /* number of entries in this bundle */
+            const uint8 bundletype = *(entryptr++);
+            total_ordinals += numentries;
+            if (bundletype != 0x00) {
+                entryptr += ((bundletype == 0xFF) ? 6 : 3) * numentries;
+            } // if
+        } // while
+
+        if (total_ordinals > 0) {
+            LxExport *lxexp = (LxExport *) malloc(sizeof (LxExport) * total_ordinals);
+            if (!lxexp) {
+                fprintf(stderr, "Out of memory!\n");
+                goto loadne_failed;
+            } // if
+            memset(lxexp, '\0', sizeof (LxExport) * total_ordinals);
+            retval->exports = lxexp;
+
+            uint32 ordinal = 1;
+            entryptr = exe + ne->entry_table_offset;
+            while (*entryptr) {  /* end field has a value of zero. */
+                const uint8 numentries = *(entryptr++);  /* number of entries in this bundle */
+                const uint8 bundletype = *(entryptr++);
+
+                switch (bundletype) {
+                    case 0x00: // UNUSED
+                        ordinal += numentries;
+                        break;
+
+                    case 0xFF: // MOVABLE
+                        for (uint8 i = 0; i < numentries; i++) {
+                            const uint8 flags = *(entryptr++); FIXME("deal with flags"); (void) flags;
+                            /*const uint16 int3f = *((const uint16 *) entryptr);*/ entryptr += 2;
+                            const uint8 segment = (*(entryptr++)) - 1;
+                            const uint16 offset = *((const uint16 *) entryptr); entryptr += 2;
+                            lxexp->ordinal = ordinal++;
+                            lxexp->addr = ((uint8 *) retval->mmaps[segment].addr) + offset;
+                            lxexp->object = &retval->mmaps[segment];
+                            lxexp++;
+                        } // for
+                        break;
+
+                    default:
+                        for (uint8 i = 0; i < numentries; i++) {
+                            const uint8 segment = bundletype - 1;
+                            const uint8 flags = *(entryptr++); FIXME("deal with flags"); (void) flags;
+                            const uint16 offset = *((const uint16 *) entryptr); entryptr += 2;
+                            lxexp->ordinal = ordinal++;
+                            lxexp->addr = ((uint8 *) retval->mmaps[segment].addr) + offset;
+                            lxexp->object = &retval->mmaps[segment];
+                            lxexp++;
+                        } // for
+                        break;
+                } // switch
+            } // while
+
+            retval->num_exports = (uint32) (lxexp - retval->exports);
+        } // if
+    } // if
+
+    // Now load named entry points.
+    if (ne->resident_name_table_offset) {
+        if (!loadLxNameTable(retval, exe + ne->resident_name_table_offset))
+            goto loadne_failed;
+    } // if
+
+    if (ne->non_resident_name_table_offset && ne->non_resident_name_table_size) {
+        if (!loadLxNameTable(retval, origexe + ne->non_resident_name_table_offset))
+            goto loadne_failed;
+    } // if
+
+    // Load other dependencies of this module.
+    const uint16 *import_modules_table = (const uint16 *) (exe + ne->module_reference_table_offset);
+    for (uint32 i = 0; i < ne->num_module_ref_table_entries; i++) {
+        const uint8 *nameptr = (exe + ne->imported_names_table_offset) + *(import_modules_table++);
+        const uint8 namelen = *(nameptr++);
+        char name[256];
+        memcpy(name, nameptr, namelen);
+        name[namelen] = '\0';
+        retval->dependencies[i] = loadModuleByModuleNameInternal(name, dependency_tree_depth);
+        if (!retval->dependencies[i]) {
+            fprintf(stderr, "Failed to load dependency '%s' for module '%s'\n", name, modname);
+            goto loadne_failed;
+        } // if
+    } // for
+
+    // Run through again and do all the fixups...
+    seg = (const NeSegmentTableEntry *) (exe + ne->segment_table_offset);
+    for (uint32 i = 0; i < ne->num_segment_table_entries; i++, seg++) {
+        if (!fixupNeSegment(seg, retval, (uint8 *) retval->mmaps[i].addr, ne->sector_alignment_shift_count, origexe, exe, exelen)) {
+            goto loadne_failed;
+        }
+
+        // Now set all the pages of this object to the proper final permissions...
+        const int iscode = ((seg->segment_flags & 0x7) == 0) ? 1 : 0;
+        const int preload = (seg->segment_flags & 0x40) ? 1 : 0;  // PRELOAD implies read-only, according to spec.
+        const int prot = ((preload && !iscode) ? 0 : PROT_WRITE) | (iscode ? PROT_EXEC : 0) | PROT_READ;
+        retval->mmaps[i].prot = prot;
+
+        //printf("mprotect(%p, %u, %s%s%s);\n", retval->mmaps[i].mapped, (uint) retval->mmaps[i].size, (prot&PROT_READ) ? "R" : "-", (prot&PROT_WRITE) ? "W" : "-", (prot&PROT_EXEC) ? "X" : "-");
+
+        if (mprotect(retval->mmaps[i].mapped, retval->mmaps[i].size, prot) == -1) {
+            fprintf(stderr, "mprotect(%p, %u, %s%s%s) failed (%d): %s\n",
+                    retval->mmaps[i].mapped, (uint) retval->mmaps[i].size,
+                    (prot&PROT_READ) ? "R" : "-",
+                    (prot&PROT_WRITE) ? "W" : "-",
+                    (prot&PROT_EXEC) ? "X" : "-",
+                    errno, strerror(errno));
+            goto loadne_failed;
+        } // if
+    } // for
+
+    retval->os2path = makeOS2Path(fname);
+    if (!retval->os2path)
+        goto loadne_failed;
+
+    if (!isDLL) {
+        retval->initialized = 1;
+    } else {
+        // call library init code...
+        assert(GLoaderState.main_module != NULL);
+        assert(GLoaderState.main_module != retval);
+        runNeLibraryInit(retval);
+
+        retval->initialized = 1;
+
+        // module is ready to use, put it in the loaded list.
+        // !!! FIXME: mutex this
+        if (GLoaderState.loaded_modules) {
+            retval->next = GLoaderState.loaded_modules;
+            GLoaderState.loaded_modules->prev = retval;
+        } // if
+        GLoaderState.loaded_modules = retval;
+    } // if
+
+    return retval;
+
+loadne_failed:
+    freeLxModule(retval);
+    return NULL;
+} // loadNeModule
+
+static LxModule *loadModule(const char *fname, uint8 *exe, uint32 exelen, int dependency_tree_depth)
+{
+    //printf("loadModule('%s')\n", fname); fflush(stdout);
+    //const uint32 origexelen = exelen;
+    const uint8 *origexe = exe;
+    int is_lx = 0;
+
+    if (!sanityCheckModule(&exe, &exelen, &is_lx)) {
+        return NULL;
+    }
+
+    return is_lx ?
+        loadLxModule(fname, origexe, exe, exelen, dependency_tree_depth) :
+        loadNeModule(fname, origexe, exe, exelen, dependency_tree_depth);
+} // loadModule
+
+
+static LxModule *loadModuleByPathInternal(const char *fname, const int dependency_tree_depth)
 {
     const char *what = NULL; (void) what;
     uint8 *module = NULL;
@@ -1810,7 +2424,7 @@ static LxModule *loadLxModuleByPathInternal(const char *fname, const int depende
 
     #undef LOADFAIL
 
-    LxModule *retval = loadLxModule(fname, module, modulelen, dependency_tree_depth);
+    LxModule *retval = loadModule(fname, module, modulelen, dependency_tree_depth);
     free(module);
     return retval;
 
@@ -1820,12 +2434,12 @@ loadmod_failed:
         fclose(io);
     free(module);
     return NULL;
-} // loadLxModuleByPathInternal
+} // loadModuleByPathInternal
 
-static inline LxModule *loadLxModuleByPath(const char *fname)
+static inline LxModule *loadModuleByPath(const char *fname)
 {
-    return loadLxModuleByPathInternal(fname, 0);
-} // loadLxModuleByPath
+    return loadModuleByPathInternal(fname, 0);
+} // loadModuleByPath
 
 static LxModule *loadNativeModule(const char *fname, const char *modname)
 {
@@ -1874,7 +2488,7 @@ loadnative_failed:
     return NULL;
 } // loadNativeModule
 
-static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int dependency_tree_depth)
+static LxModule *loadModuleByModuleNameInternal(const char *modname, const int dependency_tree_depth)
 {
     // !!! FIXME: mutex this
     for (LxModule *i = GLoaderState.loaded_modules; i != NULL; i = i->next) {
@@ -1892,7 +2506,7 @@ static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int
 
     LxModule *retval = NULL;
     if (access(fname, F_OK) == 0)
-        retval = loadLxModuleByPathInternal(fname, dependency_tree_depth);
+        retval = loadModuleByPathInternal(fname, dependency_tree_depth);
 
     if (!retval) {
         snprintf(fname, sizeof (fname), "./lib%s.so", modname);
@@ -1912,14 +2526,14 @@ static LxModule *loadLxModuleByModuleNameInternal(const char *modname, const int
         } // if
     } // if
     return retval;
-} // loadLxModuleByModuleNameInternal
+} // loadModuleByModuleNameInternal
 
-static LxModule *loadLxModuleByModuleName(const char *modname)
+static LxModule *loadModuleByModuleName(const char *modname)
 {
-    return loadLxModuleByModuleNameInternal(modname, 0);
-} // loadLxModuleByModuleName
+    return loadModuleByModuleNameInternal(modname, 0);
+} // loadModuleByModuleName
 
-static LxModule *loadLxModuleByPathOrModuleName(const char *modname)
+static LxModule *loadModuleByPathOrModuleName(const char *modname)
 {
     LxModule *retval = NULL;
     if (!strchr(modname, '/') && !strchr(modname, '\\')) {
@@ -1930,18 +2544,18 @@ static LxModule *loadLxModuleByPathOrModuleName(const char *modname)
             if (ptr) {
                 *ptr = '\0';
             }
-            retval = loadLxModuleByModuleName(str);
+            retval = loadModuleByModuleName(str);
         } // if
     } else {
         uint32 err = 0;
         char *path = lxMakeUnixPath(modname, &err);
         if (!path)
             return NULL;
-        retval = loadLxModuleByPath(path);
+        retval = loadModuleByPath(path);
         free(path);
     } // else
     return retval;
-} // loadLxModuleByPathOrModuleName
+} // loadModuleByPathOrModuleName
 
 static __attribute__((noreturn)) void handleThreadLocalStorageAccess(const int slot, ucontext_t *uctx)
 {
@@ -2091,14 +2705,14 @@ int main(int argc, char **argv, char **envp)
     GLoaderState.freeSelector = lxFreeSelector;
     GLoaderState.convert1616to32 = lxConvert1616to32;
     GLoaderState.convert32to1616 = lxConvert32to1616;
-    GLoaderState.loadModule = loadLxModuleByPathOrModuleName;
+    GLoaderState.loadModule = loadModuleByPathOrModuleName;
     GLoaderState.makeUnixPath = lxMakeUnixPath;
     GLoaderState.terminate = lxTerminate;
 
     const char *modulename = GLoaderState.subprocess ? getenv("IS_2INE") : argv[1];
-    LxModule *lxmod = loadLxModuleByPath(modulename);
+    LxModule *lxmod = loadModuleByPath(modulename);
     if (lxmod != NULL)
-        runLxModule(lxmod);
+        runModule(lxmod);
 
     return 1;
 } // main
