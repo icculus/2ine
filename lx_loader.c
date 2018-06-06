@@ -731,25 +731,29 @@ static void *generateMissingTrampoline16(const char *_module, const char *_entry
     char *module = strdup(_module);
     char *entry = strdup(_entry);
 
-    // convert stack to linear address...
-    *(ptr++) = 0x8C;  /* mov ax,ss... */
-    *(ptr++) = 0xD0;  /*  ...mov ax,ss */
-    *(ptr++) = 0xC1;  /* shr ax,byte 0x3... */
-    *(ptr++) = 0xE8;  /*  ...shr ax,byte 0x3 */
-    *(ptr++) = 0x03;  /*  ...shr ax,byte 0x3 */
-    *(ptr++) = 0x66;  /* shl eax,byte 0x10... */
-    *(ptr++) = 0xC1;  /*  ...shl eax,byte 0x10 */
-    *(ptr++) = 0xE0;  /*  ...shl eax,byte 0x10 */
-    *(ptr++) = 0x10;  /*  ...shl eax,byte 0x10 */
-    *(ptr++) = 0x89;  /* mov ax,sp... */
-    *(ptr++) = 0xE0;  /*  ...mov ax,sp */
-    // jmp to 32-bit code...
+    // USE16
+    *(ptr++) = 0x89;  /* mov cx,sp... */
+    *(ptr++) = 0xE1;  /*  ...mov cx,sp */
     *(ptr++) = 0x66;  /* jmp dword 0x7788:0x33332222... */
     *(ptr++) = 0xEA;  /*  ...jmp dword 0x7788:0x33332222 */
     const uint32 jmp32addr = (uint32) (ptr + 6);
     memcpy(ptr, &jmp32addr, 4); ptr += 4;
     memcpy(ptr, &GLoaderState.original_cs, 2); ptr += 2;
-    // now we're in 32-bit land again.
+
+    // USE32
+    *(ptr++) = 0x66;  /* mov ax,ss... */
+    *(ptr++) = 0x8C;  /*  ...mov ax,ss */
+    *(ptr++) = 0xD0;  /*  ...mov ax,ss */
+    *(ptr++) = 0x66;  /* shr ax,byte 0x3... */
+    *(ptr++) = 0xC1;  /*  ...shr ax,byte 0x3 */
+    *(ptr++) = 0xE8;  /*  ...shr ax,byte 0x3 */
+    *(ptr++) = 0x03;  /*  ...shr ax,byte 0x3 */
+    *(ptr++) = 0xC1;  /* shl eax,byte 0x10... */
+    *(ptr++) = 0xE0;  /*  ...shl eax,byte 0x10 */
+    *(ptr++) = 0x10;  /*  ...shl eax,byte 0x10 */
+    *(ptr++) = 0x66;  /* mov ax,cx... */
+    *(ptr++) = 0x89;  /*  ...mov ax,cx */
+    *(ptr++) = 0xC8;  /*  ...mov ax,cx */
     *(ptr++) = 0x66;  /* mov cx,0xabcd... */
     *(ptr++) = 0xB9;  /*  ...mov cx,0xabcd */
     memcpy(ptr, &GLoaderState.original_ss, 2); ptr += 2;
@@ -757,14 +761,23 @@ static void *generateMissingTrampoline16(const char *_module, const char *_entry
     *(ptr++) = 0xD1;  /*  ...mov ss,ecx */
     *(ptr++) = 0x89;  /* mov esp,eax... */
     *(ptr++) = 0xC4;  /*  ...mov esp,eax */
-    *(ptr++) = 0x66;  /* mov cx,0x8888... */
-    *(ptr++) = 0xB9;  /*  ...mov cx,0x8888 */
-    memcpy(ptr, &GLoaderState.original_ds, 2); ptr += 2;
-    *(ptr++) = 0x66;  /* mov cx,0x8888... */
-    *(ptr++) = 0xB9;  /*  ...mov cx,0x8888 */
-    memcpy(ptr, &GLoaderState.original_es, 2); ptr += 2;
-    *(ptr++) = 0x8E;  /* mov es,ecx... */ \
-    *(ptr++) = 0xC1;  /*  ...mov es,ecx */ \
+
+    if (GLoaderState.original_ss != GLoaderState.original_ds) {
+        *(ptr++) = 0x66;  /* mov cx,0x8888... */
+        *(ptr++) = 0xB9;  /*  ...mov cx,0x8888 */
+        memcpy(ptr, &GLoaderState.original_ds, 2); ptr += 2;
+    }
+    *(ptr++) = 0x8E;  /* mov ds,ecx... */
+    *(ptr++) = 0xD9;  /*  ...mov ds,ecx */
+
+    if (GLoaderState.original_es != GLoaderState.original_ds) {
+        *(ptr++) = 0x66;  /* mov cx,0x8888... */
+        *(ptr++) = 0xB9;  /*  ...mov cx,0x8888 */
+        memcpy(ptr, &GLoaderState.original_es, 2); ptr += 2;
+    }
+    *(ptr++) = 0x8E;  /* mov es,ecx... */
+    *(ptr++) = 0xC1;  /*  ...mov es,ecx */
+
     // okay, CPU is in a sane state again, call the trampoline. Don't bother cleaning up.
     *(ptr++) = 0x68;  // pushl immediate
     memcpy(ptr, &entry, sizeof (char *));
