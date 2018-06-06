@@ -15,8 +15,13 @@
 
 // !!! FIXME: some cut-and-paste with lx_loader.c ...
 
-static int sanityCheckLxExe(const uint8 *exe)
+static int sanityCheckLxExe(const uint8 *exe, const uint32 exelen)
 {
+    if (sizeof (LxHeader) >= exelen) {
+        fprintf(stderr, "not an OS/2 EXE\n");
+        return 0;
+    }
+
     const LxHeader *lx = (const LxHeader *) exe;
     if ((lx->byte_order != 0) || (lx->word_order != 0)) {
         fprintf(stderr, "Program is not little-endian!\n");
@@ -46,8 +51,13 @@ static int sanityCheckLxExe(const uint8 *exe)
     return 1;
 } // sanityCheckLxExe
 
-static int sanityCheckNeExe(const uint8 *exe)
+static int sanityCheckNeExe(const uint8 *exe, const uint32 exelen)
 {
+    if (sizeof (NeHeader) >= exelen) {
+        fprintf(stderr, "not an OS/2 EXE\n");
+        return 0;
+    }
+
     const NeHeader *ne = (const NeHeader *) exe;
     if (ne->exe_type != 1) {
         fprintf(stderr, "Not an OS/2 NE EXE file (exe_type is %d, not 1)\n", (int) ne->exe_type);
@@ -59,16 +69,12 @@ static int sanityCheckNeExe(const uint8 *exe)
 
 static int sanityCheckExe(uint8 **_exe, uint32 *_exelen, int *_is_lx)
 {
-    if (*_exelen < 196) {
+    if (*_exelen < 62) {
         fprintf(stderr, "not an OS/2 EXE\n");
         return 0;
     }
     const uint32 header_offset = *((uint32 *) (*_exe + 0x3C));
     //printf("header offset is %u\n", (uint) header_offset);
-    if ((header_offset + sizeof (LxHeader)) >= *_exelen) {
-        fprintf(stderr, "not an OS/2 EXE\n");
-        return 0;
-    }
 
     *_exe += header_offset;  // skip the DOS stub, etc.
     *_exelen -= header_offset;
@@ -77,10 +83,10 @@ static int sanityCheckExe(uint8 **_exe, uint32 *_exelen, int *_is_lx)
 
     if ((magic[0] == 'L') && (magic[1] == 'X')) {
         *_is_lx = 1;
-        return sanityCheckLxExe(*_exe);
+        return sanityCheckLxExe(*_exe, *_exelen);
     } else if ((magic[0] == 'N') && (magic[1] == 'E')) {
         *_is_lx = 0;
-        return sanityCheckNeExe(*_exe);
+        return sanityCheckNeExe(*_exe, *_exelen);
     }
 
     fprintf(stderr, "not an OS/2 EXE\n");
