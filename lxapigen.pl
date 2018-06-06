@@ -229,7 +229,7 @@ EOF
 
     close(OUT);
 
-    if ((system("diff --brief '$finalfname' '$outfname'") == -1) || ($? != 0)) {
+    if ((system("diff -u '$finalfname' '$outfname'") == -1) || ($? != 0)) {
         rename($outfname, $finalfname) or die("Failed to rename '$outfname' to '$finalfname': $!\n");
     } else {
         unlink($outfname);  # they match, just delete the new copy so build system doesn't rebuild everything.
