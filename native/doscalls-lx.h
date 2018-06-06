@@ -9,6 +9,32 @@
 /* This is glue code for OS/2 binaries. Native binaries don't need this. */
 #if LX_LEGACY
 
+static VOID bridge16to32_Dos16Exit(uint8 *args) {
+    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, result);
+    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, action);
+    Dos16Exit(action, result);
+}
+
+static APIRET16 bridge16to32_Dos16GetHugeShift(uint8 *args) {
+    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PUSHORT, pcount);
+    return Dos16GetHugeShift(pcount);
+}
+
+static APIRET16 bridge16to32_Dos16GetMachineMode(uint8 *args) {
+    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PBYTE, pmode);
+    return Dos16GetMachineMode(pmode);
+}
+
+static APIRET16 bridge16to32_Dos16GetVersion(uint8 *args) {
+    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PUSHORT, pver);
+    return Dos16GetVersion(pver);
+}
+
+static APIRET16 bridge16to32_Dos16GetPID(uint8 *args) {
+    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PPIDINFO, ppidinfo);
+    return Dos16GetPID(ppidinfo);
+}
+
 static APIRET16 bridge16to32_DosSemRequest(uint8 *args) {
     LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(LONG, ms);
     LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PHSEM16, sem);
@@ -32,6 +58,11 @@ static APIRET16 bridge16to32_DosSemSet(uint8 *args) {
 }
 
 LX_NATIVE_MODULE_16BIT_SUPPORT()
+    LX_NATIVE_MODULE_16BIT_API(Dos16Exit)
+    LX_NATIVE_MODULE_16BIT_API(Dos16GetHugeShift)
+    LX_NATIVE_MODULE_16BIT_API(Dos16GetMachineMode)
+    LX_NATIVE_MODULE_16BIT_API(Dos16GetVersion)
+    LX_NATIVE_MODULE_16BIT_API(Dos16GetPID)
     LX_NATIVE_MODULE_16BIT_API(DosSemRequest)
     LX_NATIVE_MODULE_16BIT_API(DosSemClear)
     LX_NATIVE_MODULE_16BIT_API(DosSemWait)
@@ -44,6 +75,11 @@ LX_NATIVE_MODULE_DEINIT({
 
 static int init16_doscalls(void) {
     LX_NATIVE_MODULE_INIT_16BIT_SUPPORT()
+        LX_NATIVE_INIT_16BIT_BRIDGE(Dos16Exit, 4)
+        LX_NATIVE_INIT_16BIT_BRIDGE(Dos16GetHugeShift, 4)
+        LX_NATIVE_INIT_16BIT_BRIDGE(Dos16GetMachineMode, 4)
+        LX_NATIVE_INIT_16BIT_BRIDGE(Dos16GetVersion, 4)
+        LX_NATIVE_INIT_16BIT_BRIDGE(Dos16GetPID, 4)
         LX_NATIVE_INIT_16BIT_BRIDGE(DosSemRequest, 8)
         LX_NATIVE_INIT_16BIT_BRIDGE(DosSemClear, 4)
         LX_NATIVE_INIT_16BIT_BRIDGE(DosSemWait, 8)
@@ -53,6 +89,11 @@ static int init16_doscalls(void) {
 }
 
 LX_NATIVE_MODULE_INIT({ if (!init16_doscalls()) return 0; })
+    LX_NATIVE_EXPORT16(Dos16Exit, 5),
+    LX_NATIVE_EXPORT16(Dos16GetHugeShift, 41),
+    LX_NATIVE_EXPORT16(Dos16GetMachineMode, 49),
+    LX_NATIVE_EXPORT16(Dos16GetVersion, 92),
+    LX_NATIVE_EXPORT16(Dos16GetPID, 94),
     LX_NATIVE_EXPORT16(DosSemRequest, 140),
     LX_NATIVE_EXPORT16(DosSemClear, 141),
     LX_NATIVE_EXPORT16(DosSemWait, 142),

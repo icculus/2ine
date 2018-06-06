@@ -295,10 +295,8 @@ static void runDosExitList(const uint32 why)
     } // for
 } // runDosExitList
 
-VOID DosExit(ULONG action, ULONG exitcode)
+static VOID DosExit_implementation(ULONG action, ULONG exitcode)
 {
-    TRACE_NATIVE("DosExit(%u, %u)", (uint) action, (uint) exitcode);
-
     // !!! FIXME: what does a value other than 0 or 1 do here?
     if (action == EXIT_THREAD) {
         // !!! FIXME: If last thread: terminate process.
@@ -310,6 +308,12 @@ VOID DosExit(ULONG action, ULONG exitcode)
     runDosExitList(TC_EXIT);
 
     GLoaderState.terminate(exitcode);
+} // DosExit_implementation
+
+VOID DosExit(ULONG action, ULONG exitcode)
+{
+    TRACE_NATIVE("DosExit(%u, %u)", (uint) action, (uint) exitcode);
+    DosExit_implementation(action, exitcode);
 } // DosExit
 
 APIRET DosExitList(ULONG ordercode, PFNEXITLIST fn)
@@ -2861,6 +2865,46 @@ APIRET DosSetFileSize(HFILE h, ULONG len)
     }
     return NO_ERROR;
 } // DosSetFileSize
+
+APIRET16 Dos16GetVersion(PUSHORT pver)
+{
+    TRACE_NATIVE("Dos16GetVersion(%p)", pver);
+    uint8 *bytes = (uint8 *) pver;
+    FIXME("better version here?");
+    bytes[0] = 2;
+    bytes[1] = 4;
+    return NO_ERROR;
+} // Dos16GetVersion
+
+APIRET16 Dos16GetMachineMode(PBYTE pmode)
+{
+    TRACE_NATIVE("Dos16GetMachineMode(%p)", pmode);
+    *pmode = 1;  // 1==OS/2 mode (as opposed to zero for DOS mode).
+    return NO_ERROR;
+} // Dos16GetMachineMode
+
+APIRET16 Dos16GetHugeShift(PUSHORT pcount)
+{
+    TRACE_NATIVE("Dos16GetHugeShift(%p)", pcount);
+    *pcount = 0;  FIXME("maybe?");
+    return NO_ERROR;
+} // Dos16GetHugeShift
+
+APIRET16 Dos16GetPID(PPIDINFO ppidinfo)
+{
+    TRACE_NATIVE("Dos16GetPID(%p)", ppidinfo);
+    PTIB2 tib2 = (PTIB2) LX_GETTIB2();
+    ppidinfo->pid = GLoaderState.pib.pib_ulpid;
+    ppidinfo->tid = tib2->tib2_ultid;
+    ppidinfo->pidParent = GLoaderState.pib.pib_ulppid;
+    return NO_ERROR;
+} // Dos16GetPID
+
+VOID Dos16Exit(USHORT action, USHORT exitcode)
+{
+    TRACE_NATIVE("Dos16Exit(%u, %u)", (uint) action, (uint) exitcode);
+    DosExit_implementation(action, exitcode);
+} // Dos16Exit
 
 
 LX_NATIVE_CONSTRUCTOR(doscalls)

@@ -430,6 +430,19 @@ OS2EXPORT APIRET16 OS2API16 DosSemWait(PHSEM16 sem, LONG ms) OS2APIINFO(142);
 OS2EXPORT APIRET16 OS2API16 DosSemSet(PHSEM16 sem) OS2APIINFO(143);
 
 
+// These are only meant to be available to 16-bit binaries, some were removed in OS/2 2.0's SDK.
+OS2EXPORT APIRET16 OS2API16 Dos16GetVersion(PUSHORT pver) OS2APIINFO(92);
+OS2EXPORT APIRET16 OS2API16 Dos16GetMachineMode(PBYTE pmode) OS2APIINFO(49);
+OS2EXPORT APIRET16 OS2API16 Dos16GetHugeShift(PUSHORT pcount) OS2APIINFO(41);
+OS2EXPORT VOID OS2API16 Dos16Exit(USHORT action, USHORT result) OS2APIINFO(5);
+
+typedef struct {
+    PID pid;
+    TID tid;
+    PID pidParent;
+} PIDINFO, *PPIDINFO;
+OS2EXPORT APIRET16 OS2API16 Dos16GetPID(PPIDINFO ppidinfo) OS2APIINFO(94);
+
 
 // !!! FIXME: these should probably get sorted alphabetically and/or grouped
 // !!! FIXME:  into areas of functionality, but for now, I'm just listing them
