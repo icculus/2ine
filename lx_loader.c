@@ -672,6 +672,41 @@ static __attribute__((noreturn)) void endLxProcess(const uint32 exitcode)
     lxTerminate(exitcode);  // just in case.
 } // endLxProcess
 
+static void *lxAllocSegment(uint16 *selector, const int iscode)
+{
+    // These are meant to be 64k segments mapped for use by 16-bit code, which means we
+    //  need them under 512 megabytes so their segments can convert directly to a linear
+    //  address with some bit twiddling.
+    static size_t baseaddr = 136 * 1024 * 1024;  // just start at a random low address that (hopefully) doesn't overlap anything.
+    const uint32 segmentsize = 0x10000;
+    void *segment = mmap((void *) baseaddr, segmentsize, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (segment == ((void *) MAP_FAILED)) {
+        FIXME("This could be more robust.");
+        fprintf(stderr, "Failed to mmap a 16-bit friendly memory segment.\n");
+        return NULL;
+    }
+
+    baseaddr += segmentsize;
+    uint16 offset = 0xFFFF;
+    *selector = 0xFFFF;
+    lxFindSelector((uint32) segment, selector, &offset, iscode);
+    assert(*selector != 0xFFFF);
+    assert(offset == 0);
+    //printf("lxAllocSegment: addr=%p, selector=%x\n", segment, (uint) *selector);
+    return segment;
+} // lxAllocSegment
+
+static void lxFreeSegment(const uint16 selector)
+{
+    const uint32 addr32 = GLoaderState.ldt[selector];
+    if (addr32) {
+        void *addr = (void *) ((size_t) addr32);
+        //printf("lxFreeSegment: addr=%p, selector=%x\n", addr, (uint) selector);
+        munmap(addr, 0x10000);
+        lxFreeSelector(selector);
+    } // if
+} // lxFreeSegment
+
 static void missingEntryPointCalled(const char *module, const char *entry)
 {
     fflush(stdout);
@@ -732,31 +767,6 @@ static void *generateMissingTrampoline(const char *_module, const char *_entry)
     return trampoline;
 } // generateMissingTrampoline
 
-
-static void *mmapSegment(uint16 *selector, const int iscode)
-{
-    // These are meant to be 64k segments mapped for use by 16-bit code, which means we
-    //  need them under 512 megabytes so their segments can convert directly to a linear
-    //  address with some bit twiddling.
-    static size_t baseaddr = 136 * 1024 * 1024;  // just start at a random low address that (hopefully) doesn't overlap anything.
-    const uint32 segmentsize = 0x10000;
-    void *segment = mmap((void *) baseaddr, segmentsize, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (segment == ((void *) MAP_FAILED)) {
-        FIXME("This could be more robust.");
-        fprintf(stderr, "Failed to mmap a 16-bit friendly memory segment.\n");
-        return NULL;
-    }
-
-    baseaddr += segmentsize;
-    uint16 offset = 0xFFFF;
-    *selector = 0xFFFF;
-    lxFindSelector((uint32) segment, selector, &offset, iscode);
-    assert(*selector != 0xFFFF);
-    assert(offset == 0);
-    return segment;
-} // mmapSegment
-
-
 static void *generateMissingTrampoline16(const char *_module, const char *_entry, const LxExport **_lxexp)
 {
     static void *segment = NULL;
@@ -768,7 +778,7 @@ static void *generateMissingTrampoline16(const char *_module, const char *_entry
     {
         if (segment)
             mprotect(segment, segmentsize, PROT_READ | PROT_EXEC);
-        segment = mmapSegment(&selector, 1);
+        segment = lxAllocSegment(&selector, 1);
         assert(segment != NULL);
         assert(selector != 0xFFFF);
         segmentused = 0;
@@ -918,9 +928,9 @@ static __attribute__((noreturn)) void runNeModule(LxModule *lxmod)
     //  so we do both.
     const uint16 stacksize = (uint16) GLoaderState.mainstacksize;
     const uint16 ss = (lxmod->esp >> 16) & 0xFFFF;  // stack segment
-    const uint32 env1616 = lxConvert32to1616(GLoaderState.pib.pib_pchenv);  // this is meant to be aligned to a segment.
-    const uint16 cmdlineoffset = env1616 & 0xFFFF;
-    const uint16 envseg = (env1616 >> 16) & 0xFFFF;
+    const uint32 cmd1616 = lxConvert32to1616(GLoaderState.pib.pib_pchcmd);
+    const uint16 cmdlineoffset = cmd1616 & 0xFFFF;
+    const uint16 envseg = (cmd1616 >> 16) & 0xFFFF;
 
     uint8 *stack = (uint8 *) lxConvert1616to32(lxmod->esp);
     //printf("stack is at 32=%p 16=%x:%x\n", stack, (uint) ss, (uint) (lxmod->esp & 0xFFFF));
@@ -932,7 +942,7 @@ static __attribute__((noreturn)) void runNeModule(LxModule *lxmod)
     stack -= 2; *((uint16 *) stack) = ss;  // bottom of stack
 
     uint16 selector = 0xFFFF;
-    void *segment = mmapSegment(&selector, 1);
+    void *segment = lxAllocSegment(&selector, 1);
     assert(segment != NULL);
     assert(selector != 0xFFFF);
     char *ptr = (char *) segment;
@@ -2180,11 +2190,11 @@ static LxModule *loadNeModule(const char *fname, const uint8 *origexe, uint8 *ex
         //const int movable = (seg->segment_flags & 0x10) != 0;
         const int iscode = ((seg->segment_flags & 0x7) == 0) ? 1 : 0;
         uint16 selector = 0xFFFF;
-        void *mmapaddr = mmapSegment(&selector, iscode);
-        //printf("%s neobj #%u mmapSegment(%d) == %p (selector=0x%X)\n", retval->name, (uint) i, iscode, mmapaddr, (uint) selector);
+        void *mmapaddr = lxAllocSegment(&selector, iscode);
+        //printf("%s neobj #%u lxAllocSegment(%d) == %p (selector=0x%X)\n", retval->name, (uint) i, iscode, mmapaddr, (uint) selector);
 
         if (mmapaddr == NULL) {
-            fprintf(stderr, "mmapSegment(%d) failed\n", iscode);
+            fprintf(stderr, "lxAllocSegment(%d) failed\n", iscode);
             goto loadne_failed;
         } else if (selector == 0xFFFF) {
             munmap(mmapaddr, vsize);
@@ -2709,6 +2719,8 @@ int main(int argc, char **argv, char **envp)
     GLoaderState.setOs2Tib = lxSetOs2Tib;
     GLoaderState.getOs2Tib = lxGetOs2Tib;
     GLoaderState.deinitOs2Tib = lxDeinitOs2Tib;
+    GLoaderState.allocSegment = lxAllocSegment;
+    GLoaderState.freeSegment = lxFreeSegment;
     GLoaderState.findSelector = lxFindSelector;
     GLoaderState.freeSelector = lxFreeSelector;
     GLoaderState.convert1616to32 = lxConvert1616to32;

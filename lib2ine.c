@@ -329,6 +329,14 @@ static char *makeUnixPath_lib2ine(const char *os2path, uint32 *err)
     return retval;
 }
 
+static void *allocSegment_lib2ine(uint16 *selector, const int iscode)
+{
+    if (selector) *selector = 0xFFFF;
+    return NULL;
+}
+
+static void freeSegment_lib2ine(const uint16 selector) {}
+
 static void __attribute__((noreturn)) terminate_lib2ine(const uint32 exitcode)
 {
     exit((int) exitcode);  // let static constructors and atexit() run.
@@ -348,6 +356,8 @@ LX_NATIVE_CONSTRUCTOR(lib2ine)
     GLoaderState.setOs2Tib = setOs2Tib_lib2ine;
     GLoaderState.getOs2Tib = getOs2Tib_lib2ine;
     GLoaderState.deinitOs2Tib = deinitOs2Tib_lib2ine;
+    GLoaderState.allocSegment = allocSegment_lib2ine;
+    GLoaderState.freeSegment = freeSegment_lib2ine;
     GLoaderState.findSelector = findSelector_lib2ine;
     GLoaderState.freeSelector = freeSelector_lib2ine;
     GLoaderState.convert1616to32 = convert1616to32_lib2ine;

@@ -127,6 +127,39 @@ static void timespecNowPlusMilliseconds(struct timespec *waittime, const ULONG u
     } // if
 } // timespecNowPlusMilliseconds
 
+static void initHFileInfoFromUnixFd(const int fd, HFileInfo *info)
+{
+    struct stat statbuf;
+    if ((fd != -1) && (fstat(fd, &statbuf) == 0)) {
+        ULONG type = 0;
+        switch (statbuf.st_mode & S_IFMT) {
+            case S_IFREG:
+                type = 0;
+                break;
+            case S_IFBLK:
+            case S_IFCHR:
+                type = 1;
+                break;
+            case S_IFIFO:
+            case S_IFSOCK:
+            default:
+                type = 2;
+                break;
+        } // switch
+        info->fd = fd;
+        info->type = type;
+        FIXME("What should this be?");
+        info->attr = DAW_STDIN | DAW_STDOUT | DAW_LEVEL1 | DAW_CHARACTER;
+        info->flags = 0;
+    } else {
+        info->fd = -1;
+        info->type = 0;
+        info->attr = 0;
+        info->flags = 0;
+    } // else
+} // initHFileInfoFromUnixFd
+
+
 APIRET DosGetInfoBlocks(PTIB *pptib, PPIB *pppib)
 {
     TRACE_NATIVE("DosGetInfoBlocks(%p, %p)", pptib, pppib);
@@ -259,11 +292,8 @@ static int getHFileUnixDescriptor(HFILE h)
     return fd;
 } // getHFileUnixDescriptor
 
-
-APIRET DosWrite(HFILE h, PVOID buf, ULONG buflen, PULONG actual)
+static APIRET DosWrite_implementation(HFILE h, PVOID buf, ULONG buflen, PULONG actual)
 {
-    TRACE_NATIVE("DosWrite(%u, %p, %u, %p)", (uint) h, buf, (uint) buflen, actual);
-
     const int fd = getHFileUnixDescriptor(h);
     if (fd == -1)
         return ERROR_INVALID_HANDLE;
@@ -277,6 +307,12 @@ APIRET DosWrite(HFILE h, PVOID buf, ULONG buflen, PULONG actual)
 
     *actual = (uint32) rc;
     return NO_ERROR;
+} // DosWrite_implementation
+
+APIRET DosWrite(HFILE h, PVOID buf, ULONG buflen, PULONG actual)
+{
+    TRACE_NATIVE("DosWrite(%u, %p, %u, %p)", (uint) h, buf, (uint) buflen, actual);
+    return DosWrite_implementation(h, buf, buflen, actual);
 } // DosWrite
 
 static void runDosExitList(const uint32 why)
@@ -555,6 +591,7 @@ APIRET DosSetRelMaxFH(PLONG pincr, PULONG pcurrent)
             HFileInfo *info = (HFileInfo *) realloc(HFiles, sizeof (HFileInfo) * (MaxHFiles + incr));
             if (info != NULL) {
                 HFiles = info;
+                FIXME("this needs to initialize the end of the array, not the front");
                 for (LONG i = 0; i < incr; i++, info++) {
                     info->fd = -1;
                     info->type = 0;
@@ -605,10 +642,8 @@ APIRET DosSubAllocMem(PVOID pbBase, PPVOID ppb, ULONG cb)
     return NO_ERROR;
 } // DosSubAllocMem
 
-APIRET DosQueryHType(HFILE hFile, PULONG pType, PULONG pAttr)
+static APIRET DosQueryHType_implementation(HFILE hFile, PULONG pType, PULONG pAttr)
 {
-    TRACE_NATIVE("DosQueryHType(%u, %p, %p)", (uint) hFile, pType, pAttr);
-
     APIRET retval = NO_ERROR;
 
     grabLock(&GMutexDosCalls);
@@ -622,6 +657,12 @@ APIRET DosQueryHType(HFILE hFile, PULONG pType, PULONG pAttr)
     ungrabLock(&GMutexDosCalls);
 
     return retval;
+} // DosQueryHType_implementation
+
+APIRET DosQueryHType(HFILE hFile, PULONG pType, PULONG pAttr)
+{
+    TRACE_NATIVE("DosQueryHType(%u, %p, %p)", (uint) hFile, pType, pAttr);
+    return DosQueryHType_implementation(hFile, pType, pAttr);
 } // DosQueryHType
 
 APIRET DosSetMem(PVOID pb, ULONG cb, ULONG flag)
@@ -809,7 +850,7 @@ static APIRET doDosOpen(PSZ pszFileName, PHFILE pHf, PULONG pulAction, LONGLONG 
             FIXME("Replacing a file should delete all its EAs, too");
     } // if
 
-    info->fd = fd;
+    initHFileInfoFromUnixFd(fd, info);
 
     if (fd == -1) {
         switch (errno) {
@@ -1998,7 +2039,7 @@ APIRET DosQueryCp(ULONG cb, PULONG arCP, PULONG pcCP)
 
     FIXME("This is mostly a stub");
 
-    if (cb < sizeof (ULONG) * 2)
+    if (cb < sizeof (*arCP) * 2)
         return ERROR_CPLIST_TOO_SMALL;
 
     // 437 == United States codepage.
@@ -2006,7 +2047,7 @@ APIRET DosQueryCp(ULONG cb, PULONG arCP, PULONG pcCP)
     arCP[1] = 437;  // prepared system codepage
 
     if (pcCP)
-        *pcCP = sizeof (ULONG) * 2;
+        *pcCP = sizeof (*arCP) * 2;
 
     return NO_ERROR;
 } // DosQueryCp
@@ -2890,13 +2931,21 @@ APIRET16 Dos16GetHugeShift(PUSHORT pcount)
     return NO_ERROR;
 } // Dos16GetHugeShift
 
-APIRET16 Dos16GetPID(PPIDINFO ppidinfo)
+APIRET16 Dos16GetPID(PPIDINFO16 ppidinfo)
 {
     TRACE_NATIVE("Dos16GetPID(%p)", ppidinfo);
     PTIB2 tib2 = (PTIB2) LX_GETTIB2();
-    ppidinfo->pid = GLoaderState.pib.pib_ulpid;
-    ppidinfo->tid = tib2->tib2_ultid;
-    ppidinfo->pidParent = GLoaderState.pib.pib_ulppid;
+
+    // note that these happen to fit Linux default PID ranges in 2018, which
+    //  tend to be 32768, but can be much higher by writing to
+    //  /proc/sys/kernel/pid_max
+    assert(GLoaderState.pib.pib_ulpid <= 0xFFFF);
+    assert(GLoaderState.pib.pib_ulppid <= 0xFFFF);
+    assert(tib2->tib2_ultid <= 0xFFFF);
+
+    ppidinfo->pid = (USHORT) GLoaderState.pib.pib_ulpid;
+    ppidinfo->tid = (USHORT) tib2->tib2_ultid;
+    ppidinfo->pidParent = (USHORT) GLoaderState.pib.pib_ulppid;
     return NO_ERROR;
 } // Dos16GetPID
 
@@ -2905,6 +2954,114 @@ VOID Dos16Exit(USHORT action, USHORT exitcode)
     TRACE_NATIVE("Dos16Exit(%u, %u)", (uint) action, (uint) exitcode);
     DosExit_implementation(action, exitcode);
 } // Dos16Exit
+
+APIRET16 Dos16QHandType(USHORT handle, PUSHORT ptype, PUSHORT pflags)
+{
+    TRACE_NATIVE("Dos16QHandType(%u, %p, %p)", (uint) handle, ptype, pflags);
+    ULONG ultype, ulattr;
+    const APIRET rc = DosQueryHType_implementation((HFILE) handle, &ultype, &ulattr);
+    if (rc == NO_ERROR) {
+        if (ptype) *ptype = (USHORT) ultype;
+        if (pflags) *pflags = (USHORT) ulattr;
+    } // if
+    return (APIRET16) rc;
+} // Dos16QHandType
+
+APIRET16 Dos16AllocSeg(USHORT size, PUSHORT psel, USHORT flags)
+{
+    TRACE_NATIVE("Dos16AllocSeg(%u, %p, %u)", (uint) size, psel, (uint) flags);
+    if (psel == NULL) {
+        return ERROR_INVALID_PARAMETER;
+    } else if ((flags & 0xFFF0) != 0) {  // these bits are reserved and must be zero.
+        return ERROR_INVALID_PARAMETER;
+    }
+
+    // we don't care about the size, we just allocate a whole 64k segment. Oh well.
+    uint16 sel = 0xFFFF;
+    //void *addr = GLoaderState.allocSegment(&sel, 1);  // we mark these as code in case they want to do self-modifying magic, etc.
+    void *addr = GLoaderState.allocSegment(&sel, 0);
+    if (!addr) {
+        assert(sel == 0xFFFF);
+        return ERROR_NOT_ENOUGH_MEMORY;
+    }
+
+    assert(sel != 0xFFFF);
+
+    if (flags & (1 << 0)) {
+        FIXME("segment is meant to be shareable through Dos16GiveSeg");
+    }
+
+    if (flags & (1 << 1)) {
+        FIXME("segment is meant to be shareable through Dos16GetSeg");
+    }
+
+    // documentation says this is a selector (specifically: a segment only on
+    //  DOS in the family mode API), but it looks like OS/2 wants a segment too.
+    //*psel = (USHORT) sel;
+    *psel = (USHORT) ((sel << 3) | 7);
+    return NO_ERROR;
+} // Dos16AllocSeg
+
+APIRET16 Dos16ReallocSeg(USHORT size, USHORT sel)
+{
+    TRACE_NATIVE("Dos16ReallocSeg(%u, %u)", (uint) size, (uint) sel);
+
+    // we don't ever discard segments, and we always allocate the full 64k,
+    //  so we don't have to worry about resizing an existing segment.
+    //  But there are sharing concerns, etc.
+    FIXME("this implementation is severely lacking");
+
+    // (we should probably make sure the selector is valid...)
+    return NO_ERROR;
+} // Dos16ReallocSeg
+
+APIRET16 Dos16FreeSeg(USHORT sel)
+{
+    TRACE_NATIVE("Dos16FreeSeg(%u)", (uint) sel);
+    FIXME("this needs to deal with reference counting and shared segments");
+    // documentation says this is a selector (specifically: a segment only on
+    //  DOS in the family mode API), but it looks like OS/2 wants a segment too.
+    GLoaderState.freeSegment(sel >> 3);
+    return NO_ERROR;
+} // Dos16FreeSeg
+
+APIRET16 Dos16GetCp(USHORT cb, PUSHORT arCP, PUSHORT pcCP)
+{
+    TRACE_NATIVE("Dos16GetCp(%u, %p, %p)", (uint) cb, arCP, pcCP);
+
+    FIXME("This is mostly a stub");
+    FIXME("...and mostly copy/paste from DosQueryCp()...");
+
+    if (cb < sizeof (*arCP) * 2)
+        return ERROR_CPLIST_TOO_SMALL;
+
+    // 437 == United States codepage.
+    arCP[0] = 437;  // current process codepage
+    arCP[1] = 437;  // prepared system codepage
+
+    if (pcCP)
+        *pcCP = sizeof (*arCP) * 2;
+
+    return NO_ERROR;
+} // Dos16GetCp
+
+APIRET16 Dos16GetEnv(PUSHORT psel, PUSHORT pcmdoffset)
+{
+    TRACE_NATIVE("Dos16GetEnv(%p, %p)", psel, pcmdoffset);
+    const uint32 cmd1616 = GLoaderState.convert32to1616(GLoaderState.pib.pib_pchcmd);
+    if (pcmdoffset) *pcmdoffset = (USHORT) (cmd1616 & 0xFFFF);
+    if (psel) *psel = (USHORT) ((cmd1616 >> 16) & 0xFFFF);
+    return NO_ERROR;
+} // Dos16GetEnv
+
+APIRET16 Dos16Write(USHORT h, PVOID buf, USHORT buflen, PUSHORT actual)
+{
+    TRACE_NATIVE("DosWrite(%u, %p, %u, %p)", (uint) h, buf, (uint) buflen, actual);
+    ULONG ulactual = actual ? *actual : 0;
+    APIRET rc = DosWrite_implementation(h, buf, buflen, &ulactual);
+    if (actual) *actual = (USHORT) ulactual;
+    return (APIRET16) rc;
+} // Dos16Write
 
 
 LX_NATIVE_CONSTRUCTOR(doscalls)
@@ -2942,10 +3099,9 @@ LX_NATIVE_CONSTRUCTOR(doscalls)
     //  inherited from CMD.EXE or supplied by OS/2 for whatever purpose.
     //  For now, we just wire up stdio.
 
+    FIXME("We can iterate /proc/self/fd to get all currently-open files");
     for (int i = 0; i <= 2; i++) {
-        HFiles[i].fd = i;
-        HFiles[i].type = 1;  // !!! FIXME: could be a pipe or file.
-        HFiles[i].attr = DAW_STDIN | DAW_STDOUT | DAW_LEVEL1 | DAW_CHARACTER;
+        initHFileInfoFromUnixFd(i, &HFiles[i]);
     } // for
 }
 

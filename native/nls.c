@@ -6,10 +6,20 @@
  *  This file written by Ryan C. Gordon.
  */
 
-#include "os2native.h"
+#include "os2native16.h"
 #include "nls.h"
 
 #include "nls-lx.h"
+
+APIRET16 Dos16GetDBCSEv(USHORT buflen, PCOUNTRYCODE16 pcc, PCHAR buf)
+{
+    // !!! FIXME: implement this for real.
+    TRACE_NATIVE("Dos16GetDBCSEv(%u, %p, %p)", (uint) buflen, pcc, buf);
+    if ((pcc->country != 0) || (pcc->codepage != 0))
+        return ERROR_CODE_PAGE_NOT_FOUND;
+    memset(buf, '\0', buflen);
+    return NO_ERROR;
+} // Dos16GetDBCSEv
 
 APIRET DosQueryDBCSEnv(ULONG buflen, PCOUNTRYCODE pcc, PCHAR buf)
 {
