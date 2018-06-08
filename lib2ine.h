@@ -288,6 +288,7 @@ typedef struct LxLoaderState
     int trace_native;
     int trace_events;
     uint8 main_tib_selector;
+    uint32 mainstacksize;
     uint16 original_cs;
     uint16 original_ds;
     uint16 original_es;

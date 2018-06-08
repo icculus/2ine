@@ -916,7 +916,7 @@ static __attribute__((noreturn)) void runNeModule(LxModule *lxmod)
     //  The stack at startup should have, pushed in this order: cmdline offset, env segment, far* to top of stack, far* to bottom of stack.
     // Microsoft C 5.1 wants things in registers (maybe Watcom does too, elsewhere, and I'm reading it wrong?),
     //  so we do both.
-    const uint16 stacksize = lxmod->header.ne.stack_size ? lxmod->header.ne.stack_size : 0x10000;
+    const uint16 stacksize = (uint16) GLoaderState.mainstacksize;
     const uint16 ss = (lxmod->esp >> 16) & 0xFFFF;  // stack segment
     const uint32 env1616 = lxConvert32to1616(GLoaderState.pib.pib_pchenv);  // this is meant to be aligned to a segment.
     const uint16 cmdlineoffset = env1616 & 0xFFFF;
@@ -1771,6 +1771,7 @@ static LxModule *loadLxModule(const char *fname, const uint8 *origexe, uint8 *ex
         const uint32 stackbase = (uint32) ((size_t)lxmmap->addr);
         const uint32 stacksize = (uint32) lxmmap->size;
         retval->esp = lx->esp + stackbase;
+        GLoaderState.mainstacksize = stacksize;
 
         // This needs to be set up now, so it's available to any library
         //  init code that runs in LX land.
@@ -2219,8 +2220,6 @@ static LxModule *loadNeModule(const char *fname, const uint8 *origexe, uint8 *ex
     retval->eip = (lxSelectorToSegment(retval->mmaps[ne->reg_cs-1].alias) << 16) | ne->reg_ip;
 
     if (!isDLL) {
-        FIXME("ne->stack_size can be zero if there's a separate stack segment defined"); assert(ne->stack_size != 0);
-
         /* "If SS equals the automatic data segment and SP equals
             zero, the stack pointer is set to the top of the automatic data
             segment just below the additional heap area." */
@@ -2233,10 +2232,19 @@ static LxModule *loadNeModule(const char *fname, const uint8 *origexe, uint8 *ex
         }
         retval->esp = (lxSelectorToSegment(retval->mmaps[ne->reg_ss-1].alias) << 16) | (sp ? sp : 0xFFFF);
 
+        uint16 stacksize = ne->stack_size;
+        if (stacksize == 0) {
+            stacksize = sp;
+            if (sp && (ne->reg_ss == ne->auto_data_segment)) {
+                stacksize -= autodataseg->size;
+            }
+        }
+        GLoaderState.mainstacksize = stacksize;
+
         // This needs to be set up now, so it's available to any library
         //  init code that runs in LX land.
         void *topofstack = (void *) (((size_t) retval->mmaps[ne->reg_ss].addr) + sp);
-        GLoaderState.initOs2Tib(GLoaderState.main_tibspace, topofstack, ne->stack_size, 0);
+        GLoaderState.initOs2Tib(GLoaderState.main_tibspace, topofstack, stacksize, 0);
         GLoaderState.main_tib_selector = GLoaderState.setOs2Tib(GLoaderState.main_tibspace);
     } // if
 
