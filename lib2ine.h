@@ -167,7 +167,8 @@ typedef struct NeHeader
     uint16 sector_alignment_shift_count;
     uint16 num_resource_entries;
     uint8 exe_type;
-    uint8 reserved[9];
+    uint8 os2_exe_flags;
+    uint8 reserved[8];
 } NeHeader;
 
 typedef struct NeSegmentTableEntry

@@ -575,6 +575,17 @@ static int parseNeExe(const uint8 *origexe, const uint8 *exe)
     printf("Sector alignment shift count: %u\n", (uint) ne->sector_alignment_shift_count);
     printf("Number of resource entries: %u\n", (uint) ne->num_resource_entries);
     printf("Executable type: %u\n", (uint) ne->exe_type);
+
+    printf("OS/2 flags:");
+    if (ne->os2_exe_flags == 0) {
+        printf(" (none)");
+    } else {
+        if (ne->os2_exe_flags & (1 << 0)) printf(" LONGFILENAMES");
+        if (ne->os2_exe_flags & (1 << 1)) printf(" PROTECTEDMODE");
+        if (ne->os2_exe_flags & (1 << 2)) printf(" PROPORTIONALFONTS");
+        if (ne->os2_exe_flags & (1 << 3)) printf(" GANGLOADAREA");
+    }
+    printf("\n");
     printf("\n");
 
     const uint32 sector_shift = ne->sector_alignment_shift_count;
