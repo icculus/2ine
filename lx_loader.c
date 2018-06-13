@@ -2189,6 +2189,7 @@ static LxModule *loadNeModule(const char *fname, const uint8 *origexe, uint8 *ex
         // currently we ignore the movable flag, since we just allocate whatever, whereever, but if we _need_ specific segments, we'll have to revisit this.
         //const int movable = (seg->segment_flags & 0x10) != 0;
         const int iscode = ((seg->segment_flags & 0x7) == 0) ? 1 : 0;
+        const int isiterated = (seg->segment_flags & 0x8) ? 1 : 0;
         uint16 selector = 0xFFFF;
         void *mmapaddr = lxAllocSegment(&selector, iscode);
         //printf("%s neobj #%u lxAllocSegment(%d) == %p (selector=0x%X)\n", retval->name, (uint) i, iscode, mmapaddr, (uint) selector);
@@ -2212,15 +2213,24 @@ static LxModule *loadNeModule(const char *fname, const uint8 *origexe, uint8 *ex
         const size_t segfiledataoffset = seg->offset;
         const size_t segfiledatalen = seg->size ? seg->size : 0x10000;
         assert(segfiledatalen <= vsize);
-        size_t leftover = vsize;
-        if (segfiledataoffset) {
-            memcpy(dst, origexe + (segfiledataoffset << ne->sector_alignment_shift_count), segfiledatalen);
-            char fname[16]; snprintf(fname, sizeof (fname), "seg%d.bin", (int) i+1); FILE *io = fopen(fname, "wb"); if (io) { fwrite(dst, segfiledatalen, 1, io); fclose(io); }
-            leftover -= segfiledatalen;
-            dst += segfiledatalen;
-        }
-        if (leftover) {
-            memset(dst, '\0', leftover);
+        const uint8 *src = origexe + (segfiledataoffset << ne->sector_alignment_shift_count);
+
+        if (isiterated) {
+            if (!decompressIterated(dst, vsize, src, segfiledatalen)) {
+                fprintf(stderr, "Failed to decompress iterated segment (corrupt file or bug).\n");
+                goto loadne_failed;
+            }
+        } else {
+            size_t leftover = vsize;
+            if (segfiledataoffset) {
+                memcpy(dst, src, segfiledatalen);
+                char fname[16]; snprintf(fname, sizeof (fname), "seg%d.bin", (int) i+1); FILE *io = fopen(fname, "wb"); if (io) { fwrite(dst, segfiledatalen, 1, io); fclose(io); }
+                leftover -= segfiledatalen;
+                dst += segfiledatalen;
+            }
+            if (leftover) {
+                memset(dst, '\0', leftover);
+            }
         }
     } // for
 
