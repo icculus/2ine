@@ -554,8 +554,18 @@ static int parseNeExe(const uint8 *origexe, const uint8 *exe)
     if (ne->module_flags == 0) printf(" NOAUTODATA");
     if (ne->module_flags & 0x1) printf(" SINGLEDATA");
     if (ne->module_flags & 0x2) printf(" MULTIPLEDATA");
+    if (ne->module_flags & 0x4) printf(" FAMILYAPI");
     if (ne->module_flags & 0x2000) printf(" NOTLOADABLE");
+    if (ne->module_flags & 0x4000) printf(" NONCONFORMING");
     if (ne->module_flags & 0x8000) printf(" LIBRARYMODULE");
+    printf("\n");
+    printf("Application type: ");
+    switch ((ne->module_flags >> 8) & 0x3) {
+        case 0x0: printf("CONSOLE"); break;
+        case 0x1: printf("FULLSCREEN"); break;
+        case 0x2: printf("WINPMCOMPAT"); break;
+        case 0x3: printf("WINPMUSES"); break;
+    } // switch
     printf("\n");
     printf("Automatic data segment: %u\n", (uint) ne->auto_data_segment);
     printf("Dynamic heap size: %u\n", (uint) ne->dynamic_heap_size);
@@ -604,16 +614,23 @@ static int parseNeExe(const uint8 *origexe, const uint8 *exe)
             }
             printf("  Size: %u\n", (seg->size == 0) ? (uint) 0x10000 : (uint) seg->size);
             printf("  Segment flags:");
-            switch (seg->segment_flags & 0x7) {
+            switch (seg->segment_flags & 0x3) {
                 case 0: printf(" CODE"); break;
                 case 1: printf(" DATA"); break;
                 default: printf(" [UNKNOWN SEGMENT TYPE]"); break;
             }
+            if (seg->segment_flags & 0x4) printf(" REALMODE");
+            if (seg->segment_flags & 0x8) printf(" ITERATED");
             if (seg->segment_flags & 0x10) printf(" MOVABLE");
+            if (seg->segment_flags & 0x20) printf(" SHAREABLE");
             if (seg->segment_flags & 0x40) printf(" PRELOAD");
+            if (seg->segment_flags & 0x80) printf(" READONLY");
             if (seg->segment_flags & 0x100) printf(" RELOCINFO");
+            if (seg->segment_flags & 0x200) printf(" DEBUGINFO");
             if (seg->segment_flags & 0xF000) printf(" DISCARD");
             printf("\n");
+
+            printf("  Discard priority: %u\n", (uint) ((seg->segment_flags >> 13) & 0x7));
             printf("  Minimum allocation: %u\n", (seg->minimum_allocation == 0) ? (uint) 0x10000 : (uint) seg->minimum_allocation);
 
             if (seg->segment_flags & 0x100) {  // has relocations (fixups)
