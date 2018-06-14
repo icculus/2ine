@@ -3056,7 +3056,7 @@ APIRET16 Dos16GetEnv(PUSHORT psel, PUSHORT pcmdoffset)
 
 APIRET16 Dos16Write(USHORT h, PVOID buf, USHORT buflen, PUSHORT actual)
 {
-    TRACE_NATIVE("DosWrite(%u, %p, %u, %p)", (uint) h, buf, (uint) buflen, actual);
+    TRACE_NATIVE("Dos16Write(%u, %p, %u, %p)", (uint) h, buf, (uint) buflen, actual);
     ULONG ulactual = actual ? *actual : 0;
     APIRET rc = DosWrite_implementation(h, buf, buflen, &ulactual);
     if (actual) *actual = (USHORT) ulactual;
