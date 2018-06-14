@@ -74,6 +74,12 @@
 
 /* This is the original assembly code, for use with NASM.
 USE16  ; start in 16-bit code where our 16-bit caller lands.
+PUSH BX  ; this might be overkill, but save off everything you can, just in case.
+PUSH CX
+PUSH DX
+PUSH SI
+PUSH DI
+PUSH BP
 MOV CX, SP  ; save off sp
 JMP DWORD 0x7788:0x33332222  ; jmp into the 32-bit code segment (the next instruction!).
 
@@ -91,7 +97,7 @@ MOV AX, CX  ; move the stack offset into the low word. Now %eax has the linear s
 MOV CX, 0xABCD  ; original linear stack segment from lx_loader's main().
 MOV SS, CX
 MOV ESP, EAX  ; and the same stack pointer, but linear.
-ADD EAX, 4  ; %eax now points to original function arguments on the stack.
+ADD EAX, 16  ; %eax now points to original function arguments on the stack.
 
 PUSH EBX  ; save original ss:sp to stack.
 PUSH DS  ; save off the caller's data segment.
@@ -121,6 +127,14 @@ JMP WORD 0xAAAA:0xBBBB  ; back into 16-bit land (the next instruction!).
 USE16
 MOV SS, CX
 MOV SP, BX
+
+POP BP   ; restore all our overkill registers
+POP DI
+POP SI
+POP DX
+POP CX
+POP BX
+
 RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling convention!) with retval in AX.
 */
 
@@ -129,6 +143,12 @@ RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling
     \
     /* instructions are in Intel syntax here, not AT&T. */ \
     /* USE16 */ \
+    *(ptr++) = 0x53;  /* push bx */ \
+    *(ptr++) = 0x51;  /* push cx */ \
+    *(ptr++) = 0x52;  /* push dx */ \
+    *(ptr++) = 0x56;  /* push si */ \
+    *(ptr++) = 0x57;  /* push di */ \
+    *(ptr++) = 0x55;  /* push bp */ \
     *(ptr++) = 0x89;  /* mov cx,sp... */ \
     *(ptr++) = 0xE1;  /*  ...mov cx,sp */ \
     *(ptr++) = 0x66;  /* jmp dword 0x7788:0x33332222... */ \
@@ -167,9 +187,9 @@ RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling
     *(ptr++) = 0xD1;  /*  ...mov ss,ecx */ \
     *(ptr++) = 0x89;  /* mov esp,eax... */ \
     *(ptr++) = 0xC4;  /*  ...mov esp,eax */ \
-    *(ptr++) = 0x83;  /* add eax,byte +0x4... */ \
-    *(ptr++) = 0xC0;  /*  ...add eax,byte +0x4 */ \
-    *(ptr++) = 0x04;  /*  ...add eax,byte +0x4 */ \
+    *(ptr++) = 0x83;  /* add eax,byte +0x10... */ \
+    *(ptr++) = 0xC0;  /*  ...add eax,byte +0x10 */ \
+    *(ptr++) = 0x10;  /*  ...add eax,byte +0x10 */ \
     *(ptr++) = 0x53;  /* push ebx */ \
     *(ptr++) = 0x1E;  /* push ds */ \
     *(ptr++) = 0x06;  /* push es */ \
@@ -214,6 +234,12 @@ RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling
     *(ptr++) = 0xD1;  /*  ...mov ss,cx */ \
     *(ptr++) = 0x89;  /* mov sp,bx... */ \
     *(ptr++) = 0xDC;  /*  ...mov sp,bx */ \
+    *(ptr++) = 0x5D;  /* pop bp */ \
+    *(ptr++) = 0x5F;  /* pop di */ \
+    *(ptr++) = 0x5E;  /* pop si */ \
+    *(ptr++) = 0x5A;  /* pop dx */ \
+    *(ptr++) = 0x59;  /* pop cx */ \
+    *(ptr++) = 0x5B;  /* pop bx */ \
     *(ptr++) = 0xCA;  /* retf 0x22... */ \
     const uint16 argbytecount = argbytes; \
     memcpy(ptr, &argbytecount, 2); ptr += 2; \
