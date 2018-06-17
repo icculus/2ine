@@ -81,7 +81,7 @@ static int sanityCheckNeModule(const uint8 *exe, const uint32 exelen)
     }
 
     const NeHeader *ne = (const NeHeader *) exe;
-    if (ne->exe_type != 1) {
+    if (ne->exe_type > 1) {
         fprintf(stderr, "Not an OS/2 NE module file (exe_type is %d, not 1)\n", (int) ne->exe_type);
         return 0;
     }
