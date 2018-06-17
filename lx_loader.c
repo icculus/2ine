@@ -1022,7 +1022,7 @@ INT 0x3           ; if it returns here, crash and burn.
     __asm__ __volatile__("jmp *%%eax\n\t" : /* no outputs */ : "a" (segment) : "memory");
 
     __builtin_unreachable();
-} // runLxModule
+} // runNeModule
 
 static __attribute__((noreturn)) void runModule(LxModule *lxmod)
 {
