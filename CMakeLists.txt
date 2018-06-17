@@ -67,6 +67,8 @@ elseif(CURSES_HAVE_NCURSESW_H)
     add_definitions(-DHAVE_NCURSESW_H)
 elseif(CURSES_HAVE_CURSES_H)
     add_definitions(-DHAVE_CURSES_H)
+elseif(CURSES_HAVE_NCURSES_CURSES_H)
+    add_definitions(-DHAVE_NCURSESW_NCURSES_H)
 endif()
 
 # !!! FIXME
