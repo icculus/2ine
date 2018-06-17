@@ -166,10 +166,14 @@ static void initPib(void)
 
     // align this to 64k, because it has to be at the start of a segment
     //  for 16-bit code.
-    // !!! FIXME: ...which is to say: you can't have more than 64k
-    // !!! FIXME:  worth of environment and command line.
+    // cmd.exe uses realloc on the enviroment seg so make it 64k
+    //  (!!! FIXME: this works even though it doesn't use allocSegment because
+    //  we currently just allocate the full 64k and never actually realloc
+    //  later. allocSegment isn't up and running at this point. But we might
+    //  want lx_loader to copy this to an alloc'd segment later so we
+    //  definitely have an tileable address below 512mb.)
     char *env = NULL;
-    if (posix_memalign((void **) &env, 0x10000, len) != 0) {
+    if (posix_memalign((void **) &env, 0x10000, 0x10000) != 0) {
         fprintf(stderr, "Out of memory\n");
         abort();
     } // if
