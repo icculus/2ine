@@ -1196,7 +1196,7 @@ static void freeLxModule(LxModule *lxmod)
 
 static LxModule *loadModuleByModuleNameInternal(const char *modname, const int dependency_tree_depth);
 
-static void *getModuleProcAddrByOrdinal(const LxModule *module, const uint32 ordinal, const LxExport **_lxexp, const int want16bit)
+static void *getModuleProcAddrByOrdinal(const LxModule *module, const uint32 ordinal, const LxExport **_lxexp, const int want16bit, const int native)
 {
     //printf("lookup module == '%s', ordinal == %u\n", module->name, (uint) ordinal);
 
@@ -1206,7 +1206,7 @@ static void *getModuleProcAddrByOrdinal(const LxModule *module, const uint32 ord
             if (_lxexp)
                 *_lxexp = lxexp;
             void *retval = lxexp->addr;
-            if (lxexp->object && lxexp->object->alias != 0xFFFF)  // 16-bit bridge? this is actually a void**, due to some macro salsa.  :/
+            if (native && lxexp->object && lxexp->object->alias != 0xFFFF)  // 16-bit bridge? this is actually a void**, due to some macro salsa.  :/
                 retval = *((void**) retval);
             return retval;
         } // if
@@ -1402,7 +1402,7 @@ static void fixupPage(const uint8 *exe, LxModule *lxmod, const LxObjectTableEntr
                     fprintf(stderr, "uhoh, looking for module ordinal %u, but only %u available.\n", (uint) moduleid, (uint) lx->num_import_mod_entries);
                 } else {
                     //printf("import-by-ordinal fixup: module=%u import=%u\n", (uint) moduleid, (uint) importid);
-                    finalval = (uint32) (size_t) getModuleProcAddrByOrdinal(lxmod->dependencies[moduleid-1], importid, &lxexp, fixup_to_alias);
+                    finalval = (uint32) (size_t) getModuleProcAddrByOrdinal(lxmod->dependencies[moduleid-1], importid, &lxexp, fixup_to_alias, 1);
                 } // else
 
                 if (fixup_to_alias) {
@@ -2018,7 +2018,7 @@ static int fixupNeSegment(const NeSegmentTableEntry *seg, LxModule *lxmod, uint8
                 //const uint8 reserved = targetptr[1];
                 const uint16 offset = *((const uint16 *) &targetptr[2]);
                 if (segment == 0xFF) {  // this is like IMPORTORDINAL with ourselves as the module.
-                    void *addr = getModuleProcAddrByOrdinal(lxmod, offset, &lxexp, 1);
+                    void *addr = getModuleProcAddrByOrdinal(lxmod, offset, &lxexp, 1, 0);
                     if (addr) {
                         target = lxConvert32to1616(addr);
                     }
@@ -2032,7 +2032,7 @@ static int fixupNeSegment(const NeSegmentTableEntry *seg, LxModule *lxmod, uint8
                 const uint16 module = ((const uint16 *) targetptr)[0];
                 const uint16 ordinal = ((const uint16 *) targetptr)[1];
                 const LxExport *lxexp = NULL;
-                void *addr = getModuleProcAddrByOrdinal(lxmod->dependencies[module-1], ordinal, &lxexp, 1);
+                void *addr = getModuleProcAddrByOrdinal(lxmod->dependencies[module-1], ordinal, &lxexp, 1, 1);
                 if (addr) {
                     target = lxConvert32to1616(addr);
                 }
@@ -2250,6 +2250,7 @@ static LxModule *loadNeModule(const char *fname, const uint8 *origexe, uint8 *ex
             }
             sp = autodataseg->size + ne->stack_size;
         }
+
         retval->esp = (lxSelectorToSegment(retval->mmaps[ne->reg_ss-1].alias) << 16) | (sp ? sp : 0xFFFF);
 
         uint16 stacksize = ne->stack_size;
