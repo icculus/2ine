@@ -150,12 +150,13 @@ static void initPib(void)
 
     char **envp = environ;
 
-    const char *default_os2path = "PATH=C:\\home\\icculus\\Dropbox\\emx\\bin;C:\\WATCOM\\binp;C:\\home\\icculus";  // !!! FIXME: noooooope.
+    char path[255];
+    snprintf(path, 254, "PATH=%s", getenv("OS2PATH"));
     for (int i = 0; envp[i]; i++) {
         const char *str = envp[i];
         if (strncmp(str, "PATH=", 5) == 0) {
             if (!GLoaderState.subprocess)
-                str = default_os2path;
+                str = path;
         } else if (strncmp(str, "IS_2INE=", 8) == 0) {
             continue;
         } // if
@@ -184,7 +185,7 @@ static void initPib(void)
         const char *str = envp[i];
         if (strncmp(str, "PATH=", 5) == 0) {
             if (!GLoaderState.subprocess)
-                str = default_os2path;
+                str = path;
         } else if (strncmp(str, "LIBPATH=", 8) == 0) {
             libpath = str + 8;
         } else if (strncmp(str, "IS_2INE=", 8) == 0) {
