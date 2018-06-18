@@ -58,14 +58,31 @@ while (readdir(DIRH)) {
             #print("rettype='$rettype' fn='$fn' args='$args' apiinfo='$apiinfo'\n");
 
             my $fn = $table{'fn'};
-            my $ordinal;
+            my $ordinal = undef;
+            my $expname = undef;
             if ($apiinfo =~ /\A(\d+)\Z/) {
                 $ordinal = int($1);
             } else {
-                die("bogus OS2APIINFO for '$fn'\n");
+                foreach (split(/,/, $apiinfo)) {
+                    #print("apiinfoarg: '$_'\n");
+                    my ($infokey, $infoval) = /\A(.*?)\=(.*)\Z/;
+                    #print("apiinfo key='$infokey' val='$infoval'\n");
+                    if ($infokey eq 'ord') {
+                        if ($infoval =~ /\A(\d+)\Z/) {
+                            $ordinal = int($1);
+                        } else {
+                            die("Invalid ordinal '$infoval' for '$fn'\n");
+                        }
+                    } elsif ($infokey eq 'name') {
+                        $expname = $infoval;
+                    } else {
+                        die("unknown OS2APIINFO key '$infokey' for '$fn'\n");
+                    }
+                }
             }
 
             $table{'ordinal'} = $ordinal;
+            $table{'expname'} = $expname if defined $expname;
 
             if (defined $ordinalmap{$ordinal}) {
                 my $dupfn = $ordinalmap{$ordinal}{'fn'};
@@ -203,15 +220,15 @@ EOF
     foreach (sort { $a <=> $b } keys(%ordinalmap) ) {
         my $tableref = $ordinalmap{$_};
         my $fn = $tableref->{'fn'};
+        my $expname = $tableref->{'expname'};
         my $ordinal = $tableref->{'ordinal'};
         my $suffix = $tableref->{'is16bit'} ? '16' : '';
 
         print OUT $comma;
-        # This is a hack for tcpip32, which doesn't want to step on BSD sockets symbols.
-        if ($fn =~ /\AOS2_(.*)\Z/) {
-            print OUT "    LX_NATIVE_EXPORT_DIFFERENT_NAME($fn, \"$1\", $ordinal)";
+        if (defined $expname) {
+            print OUT "    LX_NATIVE_EXPORT${suffix}_DIFFERENT_NAME($fn, \"$expname\", $ordinal)";
         } else {
-            print OUT "    LX_NATIVE_EXPORT$suffix($fn, $ordinal)";
+            print OUT "    LX_NATIVE_EXPORT${suffix}($fn, $ordinal)";
         }
         $comma = ",\n";
     }

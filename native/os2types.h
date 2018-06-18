@@ -17,7 +17,7 @@ extern "C" {
 
 // this doesn't do anything when compiling, but a script parses these in
 //  the headers to generate some code.
-#define OS2APIINFO(retfcount)
+#define OS2APIINFO(...)
 
 #ifndef APIENTRY
 #define APIENTRY

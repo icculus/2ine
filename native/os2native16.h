@@ -265,6 +265,7 @@ RETF 0x22   ; ...and back to the (far) caller, clearing the args (Pascal calling
     typ var = (typ) GLoaderState.convert1616to32(*((uint32 *) args)); args += sizeof (uint32)
 
 #define LX_NATIVE_EXPORT16(fn, ord) { ord, #fn, &fn##16, &obj16 }
+#define LX_NATIVE_EXPORT16_DIFFERENT_NAME(fn, fnname, ord) { ord, fnname, &fn##16, &obj16 }
 
 #endif
 
