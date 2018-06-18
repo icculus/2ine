@@ -9,7 +9,28 @@
 /* This is glue code for OS/2 binaries. Native binaries don't need this. */
 #if LX_LEGACY
 
-LX_NATIVE_MODULE_INIT()
+static APIRET16 bridge16to32_Dos16SMSetTitle(uint8 *args) {
+    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PCHAR, title);
+    return Dos16SMSetTitle(title);
+}
+
+LX_NATIVE_MODULE_16BIT_SUPPORT()
+    LX_NATIVE_MODULE_16BIT_API(Dos16SMSetTitle)
+LX_NATIVE_MODULE_16BIT_SUPPORT_END()
+
+LX_NATIVE_MODULE_DEINIT({
+    LX_NATIVE_MODULE_DEINIT_16BIT_SUPPORT();
+})
+
+static int init16_sesmgr(void) {
+    LX_NATIVE_MODULE_INIT_16BIT_SUPPORT()
+        LX_NATIVE_INIT_16BIT_BRIDGE(Dos16SMSetTitle, 4)
+    LX_NATIVE_MODULE_INIT_16BIT_SUPPORT_END()
+    return 1;
+}
+
+LX_NATIVE_MODULE_INIT({ if (!init16_sesmgr()) return 0; })
+    LX_NATIVE_EXPORT16_DIFFERENT_NAME(Dos16SMSetTitle, "DOSSMSETTITLE", 5),
     LX_NATIVE_EXPORT(DosStartSession, 37)
 LX_NATIVE_MODULE_INIT_END()
 

@@ -268,6 +268,7 @@ APIRET16 VioGetBuf(PULONG pLVB, PUSHORT pcbLVB, HVIO hvio)
 APIRET16 VioGetCurType(PVIOCURSORINFO pvioCursorInfo, HVIO hvio)
 {
     TRACE_NATIVE("VioGetCurType(%p, %u)", pvioCursorInfo, (uint) hvio);
+    return NO_ERROR;
 
     if (hvio != 0)
         return ERROR_VIO_INVALID_HANDLE;  // !!! FIXME: can be non-zero when VioCreatePS() is implemented.

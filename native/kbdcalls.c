@@ -20,5 +20,39 @@ APIRET16 KbdCharIn(PKBDKEYINFO pkbci, USHORT fWait, HKBD hkbd)
     return NO_ERROR;
 } // kbdCharIn
 
+APIRET16 KBDGETSTATUS(PKBDKEYINFO pkbci, HKBD hkbd)
+{
+    TRACE_NATIVE("KbdGetStatus(%p, %u)", pkbci, hkbd);
+    FIXME("stub");
+    memset(pkbci, '\0', sizeof (*pkbci));
+    return NO_ERROR;
+}
+
+APIRET16 KBDSETSTATUS(PKBDKEYINFO pkbci, HKBD hkbd)
+{
+    TRACE_NATIVE("KbdSetStatus(%p, %u)", pkbci, hkbd);
+    FIXME("stub");
+    return NO_ERROR;
+}
+
+APIRET16 KBDSTRINGIN(PCHAR pch, PSTRINGINBUF pchin, USHORT flag, HKBD hkbd)
+{
+    TRACE_NATIVE("KbdStringIn(%p, %p, %u, %u)", pch, pchin, flag, hkbd);
+    if (!pch) return ERROR_INVALID_PARAMETER;
+    int count = 0;
+    char chr = getchar();
+    while ((chr != '\r') && (chr != '\n') && (count < pchin->cb))
+    {
+        pch[count++] = chr;
+        chr = getchar();
+    }
+    if (count < (pchin->cb - 1))
+    {
+        pch[count] = '\r';
+    }
+    if (pchin) pchin->cchIn = count;
+    return NO_ERROR;
+}
+
 // end of kbdcalls.c ...
 

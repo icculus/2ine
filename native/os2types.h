@@ -88,6 +88,9 @@ typedef SHANDLE HKBD, *PHKBD;
 typedef PCHAR PSZ;
 typedef PCHAR PCH;
 
+typedef USHORT SEL;
+typedef PUSHORT PSEL;
+
 typedef int (APIENTRY *PFN)(void);
 
 typedef ULONG ERRORID;

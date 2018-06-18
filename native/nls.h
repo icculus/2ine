@@ -50,7 +50,27 @@ typedef struct
     USHORT codepage;
 } COUNTRYCODE16, *PCOUNTRYCODE16;
 
-OS2EXPORT APIRET16 OS2API16 Dos16GetDBCSEv(USHORT buflen, PCOUNTRYCODE16 pcc, PCHAR buf) OS2APIINFO(4);
+typedef struct
+{
+    USHORT country;
+    USHORT codepage;
+    USHORT fsDateFmt;
+    CHAR szCurrency[5];
+    CHAR szThousandsSeparator[2];
+    CHAR szDecimal[2];
+    CHAR szDateSeparator[2];
+    CHAR szTimeSeparator[2];
+    UCHAR fsCurrencyFmt;
+    UCHAR cDecimalPlace;
+    UCHAR fsTimeFmt;
+    USHORT abReserved1[2];
+    CHAR szDataSeparator[2];
+    USHORT abReserved2[5];
+} COUNTRYINFO16, *PCOUNTRYINFO16;
+
+OS2EXPORT APIRET16 OS2API16 DOSGETDBCSEV(USHORT buflen, PCOUNTRYCODE16 pcc, PCHAR buf) OS2APIINFO(4);
+OS2EXPORT APIRET16 OS2API16 DOSCASEMAP(USHORT len, PCOUNTRYCODE16 pcc, PCHAR pch) OS2APIINFO(391);
+OS2EXPORT APIRET16 OS2API16 DOSGETCTRYINFO(USHORT len, PCOUNTRYCODE16 pcc, PCOUNTRYINFO16 pch, PUSHORT dlen) OS2APIINFO(393);
 
 #ifdef __cplusplus
 }

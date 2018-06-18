@@ -16,8 +16,31 @@ static APIRET16 bridge16to32_KbdCharIn(uint8 *args) {
     return KbdCharIn(pkbci, fWait, hkbd);
 }
 
+static APIRET16 bridge16to32_KbdStringIn(uint8 *args) {
+    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(HKBD, hkbd);
+    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, flag);
+    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PSTRINGINBUF, pchin);
+    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PCHAR, pch);
+    return KbdStringIn(pch, pchin, flag, hkbd);
+}
+
+static APIRET16 bridge16to32_KbdGetStatus(uint8 *args) {
+    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(HKBD, hkbd);
+    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PKBDKEYINFO, pkbci);
+    return KbdGetStatus(pkbci, hkbd);
+}
+
+static APIRET16 bridge16to32_KbdSetStatus(uint8 *args) {
+    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(HKBD, hkbd);
+    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PKBDKEYINFO, pkbci);
+    return KbdSetStatus(pkbci, hkbd);
+}
+
 LX_NATIVE_MODULE_16BIT_SUPPORT()
     LX_NATIVE_MODULE_16BIT_API(KbdCharIn)
+    LX_NATIVE_MODULE_16BIT_API(KbdStringIn)
+    LX_NATIVE_MODULE_16BIT_API(KbdGetStatus)
+    LX_NATIVE_MODULE_16BIT_API(KbdSetStatus)
 LX_NATIVE_MODULE_16BIT_SUPPORT_END()
 
 LX_NATIVE_MODULE_DEINIT({
@@ -27,12 +50,18 @@ LX_NATIVE_MODULE_DEINIT({
 static int init16_kbdcalls(void) {
     LX_NATIVE_MODULE_INIT_16BIT_SUPPORT()
         LX_NATIVE_INIT_16BIT_BRIDGE(KbdCharIn, 8)
+        LX_NATIVE_INIT_16BIT_BRIDGE(KbdStringIn, 12)
+        LX_NATIVE_INIT_16BIT_BRIDGE(KbdGetStatus, 6)
+        LX_NATIVE_INIT_16BIT_BRIDGE(KbdSetStatus, 6)
     LX_NATIVE_MODULE_INIT_16BIT_SUPPORT_END()
     return 1;
 }
 
 LX_NATIVE_MODULE_INIT({ if (!init16_kbdcalls()) return 0; })
-    LX_NATIVE_EXPORT16(KbdCharIn, 4)
+    LX_NATIVE_EXPORT16_DIFFERENT_NAME(KbdCharIn, "KBDCHARIN", 4),
+    LX_NATIVE_EXPORT16_DIFFERENT_NAME(KbdStringIn, "KBDSTRINGIN", 9),
+    LX_NATIVE_EXPORT16_DIFFERENT_NAME(KbdGetStatus, "KBDGETSTATUS", 10),
+    LX_NATIVE_EXPORT16_DIFFERENT_NAME(KbdSetStatus, "KBDSETSTATUS", 11)
 LX_NATIVE_MODULE_INIT_END()
 
 #endif /* LX_LEGACY */

@@ -11,7 +11,7 @@
 
 #include "nls-lx.h"
 
-APIRET16 Dos16GetDBCSEv(USHORT buflen, PCOUNTRYCODE16 pcc, PCHAR buf)
+APIRET16 DOSGETDBCSEV(USHORT buflen, PCOUNTRYCODE16 pcc, PCHAR buf)
 {
     // !!! FIXME: implement this for real.
     TRACE_NATIVE("Dos16GetDBCSEv(%u, %p, %p)", (uint) buflen, pcc, buf);
@@ -20,6 +20,33 @@ APIRET16 Dos16GetDBCSEv(USHORT buflen, PCOUNTRYCODE16 pcc, PCHAR buf)
     memset(buf, '\0', buflen);
     return NO_ERROR;
 } // Dos16GetDBCSEv
+
+APIRET16 DOSCASEMAP(USHORT len, PCOUNTRYCODE16 pcc, PCHAR pch)
+{
+    TRACE_NATIVE("Dos16CaseMap(%u, %p, %p)", (uint) len, pcc, pch);
+    if (!pcc) return ERROR_INVALID_PARAMETER;
+    COUNTRYCODE cc = {pcc->country, pcc->codepage};
+    APIRET16 ret = DosMapCase(len, &cc, pch);
+    pcc->country = cc.country;
+    pcc->codepage = cc.codepage;
+    return ret;
+}
+
+APIRET16 DOSGETCTRYINFO(USHORT len, PCOUNTRYCODE16 pcc, PCOUNTRYINFO16 pch, PUSHORT dlen)
+{
+    TRACE_NATIVE("Dos16GetCtryInfo(%u, %p, %p)",len, pcc, pch);
+    if (!pcc || !pch || (len < 6)) return ERROR_INVALID_PARAMETER;
+    COUNTRYINFO ci;
+    COUNTRYCODE cc = {pcc->country, pcc->codepage};
+    APIRET16 ret = DosQueryCtryInfo(sizeof(ci), &cc, &ci, NULL);
+    if (ret) return ret;
+    pch->country = ci.country;
+    pch->codepage = ci.codepage;
+    pch->fsDateFmt = ci.fsDateFmt;
+    memcpy(&pch->szCurrency, &ci.szCurrency, len - 6);
+    if (dlen) *dlen = sizeof(PCOUNTRYCODE16);
+    return NO_ERROR;
+}
 
 APIRET DosQueryDBCSEnv(ULONG buflen, PCOUNTRYCODE pcc, PCHAR buf)
 {
@@ -82,6 +109,8 @@ APIRET DosQueryCtryInfo(ULONG cb, PCOUNTRYCODE pcc, PCOUNTRYINFO pci, PULONG pcb
 
     if (pcbActual)
         *pcbActual = 38;  // OS/2 Warp 4.52 doesn't count the abReserved[5] at the end.
+
+    memcpy(pci, &ci, cb);
 
     return NO_ERROR;
 } // DosQueryCtryInfo

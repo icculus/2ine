@@ -256,6 +256,12 @@ typedef struct
     ULONG codeResult;
 } RESULTCODES, *PRESULTCODES;
 
+typedef struct
+{
+    USHORT codeTerminate;
+    USHORT codeResult;
+} RESULTCODES16, *PRESULTCODES16;
+
 enum
 {
     EXEC_SYNC,
@@ -319,6 +325,21 @@ enum
 
 typedef struct
 {
+    FDATE fdateCreation;
+    FTIME ftimeCreation;
+    FDATE fdateLastAccess;
+    FTIME ftimeLastAccess;
+    FDATE fdateLastWrite;
+    FTIME ftimeLastWrite;
+    ULONG cbFile;
+    ULONG cbFileAlloc;
+    USHORT attrFile;
+    UCHAR cchName;
+    CHAR achName[CCHMAXPATHCOMP];
+} FILEFINDBUF, *PFILEFINDBUF;
+
+typedef struct
+{
     ULONG oNextEntryOffset;
     FDATE fdateCreation;
     FTIME ftimeCreation;
@@ -360,6 +381,59 @@ typedef struct
     UCHAR szFSDName[1];
     UCHAR rgFSAData[1];
 } FSQBUFFER2, *PFSQBUFFER2;
+
+typedef struct
+{
+    ULONG time;
+    ULONG msecs;
+    UCHAR hour;
+    UCHAR minutes;
+    UCHAR seconds;
+    UCHAR hundredths;
+    USHORT timezone;
+    USHORT cusecTimerInterval;
+    UCHAR day;
+    UCHAR month;
+    USHORT year;
+    UCHAR weekday;
+    UCHAR uchMajorVersion;
+    UCHAR uchMinorVersion;
+    UCHAR chRevisionLetter;
+    UCHAR sgCurrent;
+    UCHAR sgMax;
+    UCHAR cHugeShift;
+    UCHAR fProtectModeOnly;
+    USHORT pidForeground;
+    UCHAR fDynamicSched;
+    UCHAR csecMaxWait;
+    USHORT cmsecMinSlice;
+    USHORT cmsecMaxSlice;
+    USHORT bootdrive;
+    UCHAR amecRAS[32];
+    UCHAR csgWindowableVioMax;
+    UCHAR csgPMMax;
+} GINFOSEG;
+
+typedef struct
+{
+    PID pidCurrent;
+    PID pidParent;
+    USHORT prtyCurrent;
+    TID tidCurrent;
+    USHORT sgCurrent;
+    UCHAR rfProcStatus;
+    UCHAR dummy1;
+    BOOL fForeground;
+    UCHAR typeProcess;
+    UCHAR dummy2;
+    SEL selEnvironment;
+    USHORT offCmdLine;
+    USHORT cbDataSegment;
+    USHORT cbStack;
+    USHORT cbHeap;
+    HMODULE hmod;
+    SEL selDS;
+} LINFOSEG;
 
 enum
 {
@@ -450,13 +524,32 @@ OS2EXPORT APIRET16 OS2API16 Dos16GetPID(PPIDINFO16 ppidinfo) OS2APIINFO(94);
 OS2EXPORT APIRET16 OS2API16 Dos16GetCp(USHORT cb, PUSHORT arCP, PUSHORT pcCP) OS2APIINFO(130);
 OS2EXPORT APIRET16 OS2API16 Dos16GetEnv(PUSHORT psel, PUSHORT pcmdoffset) OS2APIINFO(91);
 OS2EXPORT APIRET16 OS2API16 Dos16Write(USHORT h, PVOID buf, USHORT buflen, PUSHORT actual) OS2APIINFO(138);
-
-
+OS2EXPORT APIRET16 OS2API16 Dos16SetVec(USHORT vecnum, PFN routine, PVOID prevaddress) OS2APIINFO(89); /* prevaddress is a PFN * */
+OS2EXPORT APIRET16 OS2API16 Dos16SetSigHandler(PFN routine, PVOID prevaddress, PUSHORT prevaction, USHORT action, USHORT signumber) OS2APIINFO(14); /* prevaddress is a PFNSIGHANDLER * routine is a PFNSIGHANDLER */
+OS2EXPORT APIRET16 OS2API16 Dos16GetInfoSeg(PSEL globalseg, PSEL localseg) OS2APIINFO(8);
+OS2EXPORT APIRET16 OS2API16 Dos16QCurDisk(PUSHORT drivenum, PULONG drivemap) OS2APIINFO(72);
+OS2EXPORT APIRET16 OS2API16 Dos16QCurDir(USHORT drivenum, PBYTE dirpath, PUSHORT dirpathlen) OS2APIINFO(71);
+OS2EXPORT APIRET16 OS2API16 Dos16HoldSignal(USHORT action) OS2APIINFO(13);
+OS2EXPORT APIRET16 OS2API16 Dos16QFsInfo(USHORT drivenum, USHORT fslevel, PBYTE infobuf, USHORT infobufsize) OS2APIINFO(76);
+OS2EXPORT APIRET16 OS2API16 Dos16QFileMode(PCHAR filepath, PUSHORT attr, ULONG res) OS2APIINFO(75);
+OS2EXPORT APIRET16 OS2API16 Dos16Open(PSZ pszFileName, PUSHORT pHf, PULONG pulAction, ULONG cbFile, USHORT ulAttribute, USHORT fsOpenFlags, USHORT fsOpenMode, PEAOP2 peaop2) OS2APIINFO(70);
+OS2EXPORT APIRET16 OS2API16 Dos16FindFirst(PSZ pszFileSpec, PSHORT phdir, USHORT flAttribute, PVOID pfindbuf, USHORT cbBuf, PUSHORT pcFileNames, ULONG res) OS2APIINFO(64);
+OS2EXPORT APIRET16 OS2API16 Dos16ChDir(PSZ pszDir, ULONG res) OS2APIINFO(57);
+OS2EXPORT APIRET16 OS2API16 Dos16Close(USHORT hFile) OS2APIINFO(59);
+OS2EXPORT APIRET16 OS2API16 Dos16FindNext(USHORT hDir, PVOID pfindbuf, USHORT cbfindbuf, PUSHORT pcFilenames) OS2APIINFO(65);
+OS2EXPORT APIRET16 OS2API16 Dos16FindClose(USHORT hDir) OS2APIINFO(63);
+OS2EXPORT APIRET16 OS2API16 Dos16Delete(PSZ pszFile, ULONG res) OS2APIINFO(60);
+OS2EXPORT APIRET16 OS2API16 Dos16DupHandle(USHORT hFile, PUSHORT pHfile) OS2APIINFO(61);
+OS2EXPORT APIRET16 OS2API16 Dos16Read(USHORT hFile, PVOID pBuffer, USHORT cbRead, PUSHORT pcbActual) OS2APIINFO(137);
+OS2EXPORT APIRET16 OS2API16 Dos16ExecPgm(PCHAR pObjname, SHORT cbObjname, USHORT execFlag, PSZ pArg, PSZ pEnv, PRESULTCODES16 pRes, PSZ pName) OS2APIINFO(144);
+OS2EXPORT APIRET16 OS2API16 Dos16CWait(USHORT action, USHORT option, PRESULTCODES16 pres, PUSHORT ppid, USHORT pid) OS2APIINFO(2);
+OS2EXPORT APIRET16 OS2API16 Dos16ChgFilePtr(USHORT handle, LONG distance, USHORT whence, PULONG newoffset) OS2APIINFO(58);
 
 // !!! FIXME: these should probably get sorted alphabetically and/or grouped
 // !!! FIXME:  into areas of functionality, but for now, I'm just listing them
 // !!! FIXME:  in the order I implemented them to get things running.
 
+OS2EXPORT APIRET OS2API DosDupHandle(HFILE hFile, PHFILE pHfile) OS2APIINFO(260);
 OS2EXPORT APIRET OS2API DosGetInfoBlocks(PTIB *pptib, PPIB *pppib) OS2APIINFO(312);
 OS2EXPORT APIRET OS2API DosQuerySysInfo(ULONG iStart, ULONG iLast, PVOID pBuf, ULONG cbBuf) OS2APIINFO(348);
 OS2EXPORT APIRET OS2API DosQueryModuleName(HMODULE hmod, ULONG cbName, PCHAR pch) OS2APIINFO(320);

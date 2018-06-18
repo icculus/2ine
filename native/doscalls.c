@@ -104,6 +104,12 @@ typedef struct
 
 static DirFinder GHDir1;
 
+static GINFOSEG *ginfo;
+static SEL ginfosel;
+static LINFOSEG *linfo;
+static SEL linfosel;
+
+static HDIR *hdir16 = 0;
 
 static int grabLock(pthread_mutex_t *lock)
 {
@@ -940,10 +946,8 @@ APIRET DosReleaseMutexSem(HMTX hmtx)
     return ERROR_INVALID_HANDLE;
 } // DosReleaseMutexSem
 
-APIRET DosSetFilePtr(HFILE hFile, LONG ib, ULONG method, PULONG ibActual)
+static APIRET DosSetFilePtr_implementation(HFILE hFile, LONG ib, ULONG method, PULONG ibActual)
 {
-    TRACE_NATIVE("DosSetFilePtr(%u, %d, %u, %p)", (uint) hFile, (int) ib, (uint) method, ibActual);
-
     int whence;
     switch (method) {
         case FILE_BEGIN: whence = SEEK_SET; break;
@@ -967,12 +971,16 @@ APIRET DosSetFilePtr(HFILE hFile, LONG ib, ULONG method, PULONG ibActual)
         *ibActual = (ULONG) pos;
 
     return NO_ERROR;
+} // DosSetFilePtr_implementation
+
+APIRET DosSetFilePtr(HFILE hFile, LONG ib, ULONG method, PULONG ibActual)
+{
+    TRACE_NATIVE("DosSetFilePtr(%u, %d, %u, %p)", (uint) hFile, (int) ib, (uint) method, ibActual);
+    return DosSetFilePtr_implementation(hFile, ib, method, ibActual);
 } // DosSetFilePtr
 
-APIRET DosRead(HFILE hFile, PVOID pBuffer, ULONG cbRead, PULONG pcbActual)
+static APIRET DosRead_implementation(HFILE hFile, PVOID pBuffer, ULONG cbRead, PULONG pcbActual)
 {
-    TRACE_NATIVE("DosRead(%u, %p, %u, %p)", (uint) hFile, pBuffer, (uint) cbRead, pcbActual);
-
     const int fd = getHFileUnixDescriptor(hFile);
     if (fd == -1)
         return ERROR_INVALID_HANDLE;
@@ -985,12 +993,16 @@ APIRET DosRead(HFILE hFile, PVOID pBuffer, ULONG cbRead, PULONG pcbActual)
         *pcbActual = (ULONG) br;
 
     return NO_ERROR;
+} // DosRead_implementation
+
+APIRET DosRead(HFILE hFile, PVOID pBuffer, ULONG cbRead, PULONG pcbActual)
+{
+    TRACE_NATIVE("DosRead(%u, %p, %u, %p)", (uint) hFile, pBuffer, (uint) cbRead, pcbActual);
+    return DosRead_implementation(hFile, pBuffer, cbRead, pcbActual);
 } // DosRead
 
-APIRET DosClose(HFILE hFile)
+static APIRET DosClose_implementation(HFILE hFile)
 {
-    TRACE_NATIVE("DosClose(%u)", (uint) hFile);
-
     const int fd = getHFileUnixDescriptor(hFile);
     if (fd == -1)
         return ERROR_INVALID_HANDLE;
@@ -1008,7 +1020,14 @@ APIRET DosClose(HFILE hFile)
     ungrabLock(&GMutexDosCalls);
 
     return NO_ERROR;
+} // DosClose_implementation
+
+APIRET DosClose(HFILE hFile)
+{
+    TRACE_NATIVE("DosClose(%u)", (uint) hFile);
+    return DosClose_implementation(hFile);
 } // DosClose
+
 
 APIRET DosEnterMustComplete(PULONG pulNesting)
 {
@@ -1503,10 +1522,8 @@ static void setProcessResultCode(PRESULTCODES pRes, const int status)
     } // else if
 } // setProcessResultCode
 
-APIRET DosExecPgm(PCHAR pObjname, LONG cbObjname, ULONG execFlag, PSZ pArg, PSZ pEnv, PRESULTCODES pRes, PSZ pName)
+static APIRET DosExecPgm_implementation(PCHAR pObjname, LONG cbObjname, ULONG execFlag, PSZ pArg, PSZ pEnv, PRESULTCODES pRes, PSZ pName)
 {
-    TRACE_NATIVE("DosExecPgm(%p, %u, %u, %p, %p, %p, '%s')", pObjname, (uint) cbObjname, (uint) execFlag, pArg, pEnv, pRes, pName);
-
     APIRET retval = NO_ERROR;
 
     if (pObjname)  // !!! FIXME: what does it want to put in here for failures?
@@ -1609,6 +1626,12 @@ APIRET DosExecPgm(PCHAR pObjname, LONG cbObjname, ULONG execFlag, PSZ pArg, PSZ 
     free(exe);
 
     return retval;
+} // DosExecPgm_implementation
+
+APIRET DosExecPgm(PCHAR pObjname, LONG cbObjname, ULONG execFlag, PSZ pArg, PSZ pEnv, PRESULTCODES pRes, PSZ pName)
+{
+    TRACE_NATIVE("DosExecPgm('%s', %u, %u, '%s', '%s', %p, '%s')", pObjname, (uint) cbObjname, (uint) execFlag, pArg, pEnv, pRes, pName);
+    return DosExecPgm_implementation(pObjname, cbObjname, execFlag, pArg, pEnv, pRes, pName)
 } // DosExecPgm
 
 APIRET DosResetEventSem(HEV hev, PULONG pulPostCt)
@@ -1908,11 +1931,11 @@ APIRET DosSubFreeMem(PVOID pbBase, PVOID pb, ULONG cb)
     return NO_ERROR;
 } // DosSubAllocMem
 
-APIRET DosDelete(PSZ pszFile)
+static APIRET DosDelete_implementation(PSZ pszFile)
 {
-    TRACE_NATIVE("DosDelete('%s')", pszFile);
-
     APIRET err;
+    if (!pszFile)
+        return ERROR_INVALID_PARAMETER;
     char *unixpath = makeUnixPath(pszFile, &err);
     if (!unixpath)
         return err;
@@ -1934,7 +1957,14 @@ APIRET DosDelete(PSZ pszFile)
     } // if
 
     return NO_ERROR;
+} // DosDelete_implementation
+
+APIRET DosDelete(PSZ pszFile)
+{
+    TRACE_NATIVE("DosDelete('%s')", pszFile);
+    return DosDelete_implementation(pszFile);
 } // DosDelete
+
 
 APIRET DosQueryCurrentDir(ULONG disknum, PBYTE pBuf, PULONG pcbBuf)
 {
@@ -2058,6 +2088,17 @@ APIRET DosOpenL(PSZ pszFileName, PHFILE pHf, PULONG pulAction, LONGLONG cbFile, 
     return doDosOpen(pszFileName, pHf, pulAction, cbFile, ulAttribute, fsOpenFlags, fsOpenMode, peaop2);
 } // DosOpenL
 
+static inline ULONG findNextSizeNeeded(const ULONG ulInfoLevel, const ULONG pcFileNames)
+{
+    switch (ulInfoLevel) {
+        case -1: return (sizeof (FILEFINDBUF) - CCHMAXPATHCOMP) * pcFileNames;
+        case FIL_STANDARD: return (sizeof (FILEFINDBUF3) - CCHMAXPATHCOMP) * pcFileNames;
+        case FIL_QUERYEASIZE: return (sizeof (FILEFINDBUF4) - CCHMAXPATHCOMP) * pcFileNames;
+        case FIL_QUERYEASFROMLIST: FIXME("write me"); return 0xFFFFFFFF;
+        default: assert(!"Shouldn't hit this."); return 0xFFFFFFFF;
+    } // switch
+    __builtin_unreachable();
+} // findNextSizeNeeded;
 
 static int wildcardMatch(const char *str, const char *pattern)
 {
@@ -2094,7 +2135,7 @@ static int wildcardMatch(const char *str, const char *pattern)
     __builtin_unreachable();
 } // wildcardMatch
 
-static int findNextOne(DirFinder *dirf, PVOID *ppfindbuf, PULONG pcbBuf)
+static int findNextOne(DirFinder *dirf, PVOID *ppfindbuf, PULONG pcbBuf, int *err)
 {
     const ULONG attr = dirf->attr;
     const ULONG musthave = (attr & 0xFF00) >> 8;
@@ -2115,6 +2156,7 @@ static int findNextOne(DirFinder *dirf, PVOID *ppfindbuf, PULONG pcbBuf)
 
         const size_t namelen = strlen(name);
         if (namelen >= CCHMAXPATHCOMP) continue;
+        if (namelen + findNextSizeNeeded(dirf->level, 1) >= *pcbBuf) continue; // FIXME??
 
         if (!wildcardMatch(name, pattern)) continue;
 
@@ -2147,6 +2189,20 @@ static int findNextOne(DirFinder *dirf, PVOID *ppfindbuf, PULONG pcbBuf)
 
         // okay! Definitely take this one!
         switch (dirf->level) {
+            case -1: {
+                PFILEFINDBUF st = (PFILEFINDBUF) *ppfindbuf;
+                initFileCreationDateTime(&st->fdateCreation, &st->ftimeCreation);
+                unixTimeToOs2(statbuf.st_atime, &st->fdateLastAccess, &st->ftimeLastAccess);
+                unixTimeToOs2(statbuf.st_mtime, &st->fdateLastWrite, &st->ftimeLastWrite);
+                st->cbFile = (ULONG) statbuf.st_size;  // !!! FIXME: > 2gig files?
+                st->cbFileAlloc = (ULONG) (statbuf.st_blocks * 512);
+                if (isdir) st->attrFile |= FILE_DIRECTORY;
+                if (readonly) st->attrFile |= FILE_READONLY;
+                st->cchName = (UCHAR) namelen;
+                strcpy(st->achName, name);
+                return 1;
+            } // case
+
             case FIL_STANDARD: {
                 PFILEFINDBUF3 st = (PFILEFINDBUF3) *ppfindbuf;
                 memset(st, '\0', sizeof (*st));
@@ -2203,8 +2259,10 @@ static APIRET findNext(DirFinder *dirf, PVOID pfindbuf, ULONG cbBuf, PULONG pcFi
 
     const ULONG maxents = *pcFileNames;
     ULONG i;
+    int err = NO_ERROR;
+    memset(pfindbuf, 0, cbBuf);
     for (i = 0; i < maxents; i++) {
-        if (!findNextOne(dirf, &pfindbuf, &cbBuf))
+        if (!findNextOne(dirf, &pfindbuf, &cbBuf, &err))
             break;
     } // for
 
@@ -2213,21 +2271,11 @@ static APIRET findNext(DirFinder *dirf, PVOID pfindbuf, ULONG cbBuf, PULONG pcFi
     if ((i == 0) && (maxents > 0)) {
         closedir(dirf->dirp);
         dirf->dirp = NULL;
+        err = ERROR_NO_MORE_FILES;
     } // if
 
-    return NO_ERROR;
+    return err;
 } // findNext
-
-static inline ULONG findNextSizeNeeded(const ULONG ulInfoLevel, const ULONG pcFileNames)
-{
-    switch (ulInfoLevel) {
-        case FIL_STANDARD: return sizeof (FILEFINDBUF3) * pcFileNames;
-        case FIL_QUERYEASIZE: return sizeof (FILEFINDBUF4) * pcFileNames;
-        case FIL_QUERYEASFROMLIST: FIXME("write me"); return 0xFFFFFFFF;
-        default: assert(!"Shouldn't hit this."); return 0xFFFFFFFF;
-    } // switch
-    __builtin_unreachable();
-} // findNextSizeNeeded;
 
 APIRET DosFindFirst(PSZ pszFileSpec, PHDIR phdir, ULONG flAttribute, PVOID pfindbuf, ULONG cbBuf, PULONG pcFileNames, ULONG ulInfoLevel)
 {
@@ -2237,7 +2285,7 @@ APIRET DosFindFirst(PSZ pszFileSpec, PHDIR phdir, ULONG flAttribute, PVOID pfind
         return ERROR_INVALID_PARAMETER;
     else if (cbBuf > 0xFFFF)   // !!! FIXME: Control Program API Reference says this fails if > 64k, although that was obviously a 16-bit limitation.
         return ERROR_INVALID_PARAMETER;
-    else if ((ulInfoLevel != FIL_STANDARD) && (ulInfoLevel != FIL_QUERYEASIZE) && (ulInfoLevel != FIL_QUERYEASFROMLIST))
+    else if ((ulInfoLevel != FIL_STANDARD) && (ulInfoLevel != FIL_QUERYEASIZE) && (ulInfoLevel != FIL_QUERYEASFROMLIST) && (ulInfoLevel != -1)) // -1 for 16 call
         return ERROR_INVALID_PARAMETER;
     else if (!pcFileNames)
         return ERROR_INVALID_PARAMETER;
@@ -2250,7 +2298,7 @@ APIRET DosFindFirst(PSZ pszFileSpec, PHDIR phdir, ULONG flAttribute, PVOID pfind
     else if (cbBuf < findNextSizeNeeded(ulInfoLevel, *pcFileNames))
         return ERROR_BUFFER_OVERFLOW;
 
-    if (ulInfoLevel != FIL_STANDARD) {
+    if ((ulInfoLevel != FIL_STANDARD) && (ulInfoLevel != -1)) {
         FIXME("implement extended attribute support");
         return ERROR_INVALID_PARAMETER;
     } // if
@@ -2328,6 +2376,8 @@ APIRET DosFindFirst(PSZ pszFileSpec, PHDIR phdir, ULONG flAttribute, PVOID pfind
         return err;
     } // if
 
+    if (err == ERROR_NO_MORE_FILES)
+        return ERROR_FILE_NOT_FOUND;
     *phdir = (HDIR) dirf;
     return NO_ERROR;
 } // DosFindFirst
@@ -2907,6 +2957,45 @@ APIRET DosSetFileSize(HFILE h, ULONG len)
     return NO_ERROR;
 } // DosSetFileSize
 
+static APIRET DosDupHandle_implementation(HFILE hFile, PHFILE pHfile)
+{
+    if (*pHfile == -1) {
+        HFileInfo *info = HFiles;
+        uint32 i;
+
+        if (!grabLock(&GMutexDosCalls))
+            return ERROR_SYS_INTERNAL;
+
+        for (i = 0; i < MaxHFiles; i++, info++) {
+            if (info->fd == -1) {  // available?
+                    info->fd = -2;
+                    break;
+            } // if
+        } // for
+
+        ungrabLock(&GMutexDosCalls);
+
+        if (i == MaxHFiles) {
+            return ERROR_TOO_MANY_OPEN_FILES;
+        }
+        memcpy(&HFiles[i], &HFiles[hFile], sizeof(HFileInfo));
+        HFiles[i].fd = dup(HFiles[hFile].fd);
+        *pHfile = i;
+    } else {
+        if (HFiles[*pHfile].fd != -1)
+            return ERROR_INVALID_TARGET_HANDLE;
+        memcpy(&HFiles[*pHfile], &HFiles[hFile], sizeof(HFileInfo));
+        HFiles[*pHfile].fd = dup(HFiles[hFile].fd);
+    }
+    return NO_ERROR;
+} // DosDupHandle_implementation
+
+APIRET DosDupHandle(HFILE hFile, PHFILE pHfile)
+{
+    TRACE_NATIVE("DosDupHandle(%u, %p)", hFile, pHfile);
+    return DosDupHandle_implementation(hFile, pHfile);
+} // DosDupHandle
+
 APIRET16 Dos16GetVersion(PUSHORT pver)
 {
     TRACE_NATIVE("Dos16GetVersion(%p)", pver);
@@ -3063,6 +3152,220 @@ APIRET16 Dos16Write(USHORT h, PVOID buf, USHORT buflen, PUSHORT actual)
     return (APIRET16) rc;
 } // Dos16Write
 
+APIRET16 Dos16SetVec(USHORT vecnum, PFN routine, PVOID prevaddress)
+{
+   TRACE_NATIVE("Dos16SetVec(%u, %p, %p)", (uint) vecnum, routine, prevaddress);
+   FIXME("do something");
+   if (prevaddress) *(PFN *)prevaddress = 0;
+   return NO_ERROR;
+} 
+
+APIRET16 Dos16SetSigHandler(PFN routine, PVOID prevaddress, PUSHORT prevaction, USHORT action, USHORT signumber)
+{
+   TRACE_NATIVE("Dos16SetSigHandler(%p, %p, %p, %u, %u)", routine, prevaddress, prevaction, action, signumber);
+   FIXME("do something");
+   if (prevaddress) *(PFN *)prevaddress = 0;
+   if (prevaction) *prevaction = 0;
+   return NO_ERROR;
+} 
+
+APIRET16 OS2API16 Dos16GetInfoSeg(PSEL globalseg, PSEL localseg)
+{
+    TRACE_NATIVE("Dos16GetInfoSeg(%p, %p)", globalseg, localseg);
+    if (globalseg) *globalseg = ginfosel << 3 | 7;
+    if (localseg) *localseg = linfosel << 3 | 7;
+    return NO_ERROR;
+}
+
+APIRET16 Dos16QCurDisk(PUSHORT drivenum, PULONG drivemap)
+{
+    TRACE_NATIVE("Dos16QCurDisk(%p, %p)", drivenum, drivemap);
+    if (drivenum) *drivenum = 3; // FIXME: C: only
+    if (drivemap) *drivemap = 1 << 2;
+    return NO_ERROR;
+}
+
+APIRET16 Dos16QCurDir(USHORT drivenum, PBYTE dirpath, PUSHORT dirpathlen)
+{
+    TRACE_NATIVE("Dos16QCurDir(%d, %p, %p)", drivenum, dirpath, dirpathlen);
+    if (!dirpathlen || !dirpath) return ERROR_INVALID_PARAMETER; // ???
+    int rlen, len = *dirpathlen;
+    char dirtmp[PATH_MAX];
+    getcwd(dirtmp, PATH_MAX);
+    rlen = strlen(dirtmp);
+    if (dirpathlen) *dirpathlen = rlen + 1;
+    if (rlen >= len) {
+        *dirpathlen = rlen + 1;
+        return ERROR_BUFFER_OVERFLOW;
+    }
+    char *pch = strchr(dirtmp, '/');
+    while (pch) {
+        *pch = '\\';
+        pch = strchr(pch, '/');
+    }
+ 
+    strcpy((char *)dirpath, dirtmp + 1);
+    return NO_ERROR;
+}
+
+APIRET16 Dos16HoldSignal(USHORT action)
+{
+    TRACE_NATIVE("Dos16HoldSignal(%d)", action);
+    FIXME("stub");
+    return NO_ERROR;
+}
+
+APIRET16 Dos16QFsInfo(USHORT drivenum, USHORT fslevel, PBYTE infobuf, USHORT infobufsize)
+{
+    TRACE_NATIVE("Dos16QFsInfo(%d, %d, %p, %d)", drivenum, fslevel, infobuf, infobufsize);
+    const char label[] = "linux";
+    if (fslevel == 1)
+        FIXME("fslevel 1");
+    else if (fslevel == 2)
+    {
+        infobuf[4] = sizeof(label);
+        strcpy((char *)&infobuf[5], label);
+    }
+    return NO_ERROR;
+}
+
+APIRET16 Dos16QFileMode(PCHAR filepath, PUSHORT attr, ULONG res)
+{
+    TRACE_NATIVE("Dos16QFileMode('%s', %p, %d)", filepath, attr, res);
+    APIRET err;
+    char *path = makeUnixPath(filepath, &err);
+    if (!path) return err;
+    struct stat sbuf;
+    int ret = stat(path, &sbuf);
+    free(path);
+    if (ret) return ERROR_FILE_NOT_FOUND;
+    *attr = 0;
+    if (S_ISDIR(sbuf.st_mode))
+        *attr |= (1 << 4);
+    return NO_ERROR;
+}
+
+APIRET16 Dos16Open(PSZ pszFileName, PUSHORT pHf, PULONG pulAction, ULONG cbFile, USHORT ulAttribute, USHORT fsOpenFlags, USHORT fsOpenMode, PEAOP2 peaop2)
+{
+    TRACE_NATIVE("Dos16Open('%s', %p, %p, %u, %u, %u, %u, %p)", pszFileName, pHf, pulAction, (uint) cbFile, (uint) ulAttribute, (uint) fsOpenFlags, (uint) fsOpenMode, peaop2);
+    HFILE hf;
+    APIRET ret = doDosOpen(pszFileName, &hf, pulAction, (LONGLONG) cbFile, ulAttribute, fsOpenFlags, fsOpenMode, peaop2);
+    *pHf = hf;
+    return ret;
+} // DosOpen
+
+APIRET16 Dos16FindFirst(PSZ pszFileSpec, PSHORT phdir, USHORT flAttribute, PVOID pfindbuf, USHORT cbBuf, PUSHORT pcFileNames, ULONG res)
+{
+    if (!hdir16)
+        hdir16 = calloc(10, sizeof(HDIR)); // 10 dir handles
+    ULONG hdir32 = *phdir;
+    ULONG cfn = *pcFileNames;
+    APIRET ret = DosFindFirst(pszFileSpec, &hdir32, flAttribute, pfindbuf, cbBuf, &cfn, -1);
+    if (ret && (ret != ERROR_EAS_DIDNT_FIT))
+        return ret;
+    int i;
+    for (i = 0; i < 10; i++)
+    {
+        if(!hdir16[i])
+            break;
+    }
+    if (i == 10)
+        return ERROR_NO_MORE_FILES;
+    hdir16[i] = hdir32;
+    *phdir = i;
+    *pcFileNames = cfn;
+    return ret;
+}
+
+APIRET16 Dos16ChDir(PSZ pszDir, ULONG res)
+{
+    TRACE_NATIVE("Dos16ChDir('%s', %u)", pszDir, res);
+    APIRET err;
+    char *path = makeUnixPath(pszDir, &err);
+    if (!path) return err;
+    int ret = chdir(path);
+    free(path);
+    if (ret && (errno == ENOENT)) return ERROR_PATH_NOT_FOUND;
+    else if (ret) return ERROR_ACCESS_DENIED;
+    return NO_ERROR;
+}
+
+APIRET16 Dos16Close(USHORT hFile)
+{
+    TRACE_NATIVE("Dos16Close(%u)", (uint) hFile);
+    return DosClose_implementation(hFile);
+} // Dos16Close
+
+APIRET16 Dos16FindNext(USHORT hDir, PVOID pfindbuf, USHORT cbfindbuf, PUSHORT pcFilenames)
+{
+    APIRET ret;
+    ULONG pcfn = *pcFilenames;
+    ret = DosFindNext(hdir16[hDir], pfindbuf, cbfindbuf, &pcfn);
+    *pcFilenames = pcfn;
+    return ret;
+}
+
+APIRET16 Dos16FindClose(USHORT hDir)
+{
+    if (hDir > 10)
+        return ERROR_INVALID_HANDLE;
+    HDIR hdir32 = hdir16[hDir];
+    hdir16[hDir] = 0;
+    return DosFindClose(hdir32);
+}
+ 
+APIRET16 Dos16Delete(PSZ pszFile, ULONG res)
+{
+    TRACE_NATIVE("Dos16Delete('%s', %u)", pszFile, (uint) res);
+    return DosDelete_implementation(pszFile);
+} // Dos16Delete
+
+APIRET16 Dos16DupHandle(USHORT hFile, PUSHORT pHfile)
+{
+    TRACE_NATIVE("Dos16DupHandle(%u, %p)", (uint) hFile, pHfile);
+    HFILE phf = *(int16_t *)pHfile;
+    APIRET ret = DosDupHandle_implementation(hFile, &phf);
+    *pHfile = phf;
+    return ret;
+} // Dos16DupHandle
+
+APIRET16 Dos16Read(USHORT hFile, PVOID pBuffer, USHORT cbRead, PUSHORT pcbActual)
+{
+    TRACE_NATIVE("Dos16Read(%u, %p, %u, %p)", (uint) hFile, pBuffer, (uint) cbRead, pcbActual);
+    ULONG actual;
+    APIRET ret = DosRead_implementation(hFile, pBuffer, cbRead, &actual);
+    *pcbActual = (USHORT) actual;
+    return ret;
+} // Dos16Read
+
+APIRET16 Dos16ExecPgm(PCHAR pObjname, SHORT cbObjname, USHORT execFlag, PSZ pArg, PSZ pEnv, PRESULTCODES16 pRes, PSZ pName)
+{
+    TRACE_NATIVE("Dos16ExecPgm('%s', %d, %u, '%s', '%s', %p, '%s')", pObjname, (int) cbObjname, (uint) execFlag, pArg, pEnv, pRes, pName);
+    RESULTCODES res;
+    const APIRET ret = DosExecPgm_implementation(pObjname, cbObjname, execFlag, pArg, pEnv, &res, pName);
+    pRes->codeTerminate = (USHORT) res.codeTerminate;
+    pRes->codeResult = (USHORT) res.codeResult;
+    return ret;
+} // Dos16ExecPgm
+
+APIRET16 Dos16CWait(USHORT action, USHORT option, PRESULTCODES16 pres, PUSHORT ppid, USHORT pid)
+{
+    TRACE_NATIVE("Dos16CWait(%u, %u, %p, %p, %u)", (uint) action, (uint) option, pres, ppid, (uint) pid);
+    RESULTCODES res;
+    PID cpid;
+    APIRET ret = DosWaitChild(action, option, &res, &cpid, pid);
+    pres->codeTerminate = res.codeTerminate;
+    pres->codeResult = res.codeResult;
+    *ppid = cpid;
+    return ret;
+} // Dos16CWait
+
+APIRET16 Dos16ChgFilePtr(USHORT handle, LONG distance, USHORT whence, PULONG newoffset)
+{
+    TRACE_NATIVE("Dos16ChgFlePtr(%u, %u, %u, %p)", (uint) handle, (uint) distance, (uint) whence, newoffset);
+    return (APIRET16) DosSetFilePtr_implementation(handle, distance, whence, newoffset);
+} // Dos16ChgFilePtr
+
 
 LX_NATIVE_CONSTRUCTOR(doscalls)
 {
@@ -3103,6 +3406,39 @@ LX_NATIVE_CONSTRUCTOR(doscalls)
     for (int i = 0; i <= 2; i++) {
         initHFileInfoFromUnixFd(i, &HFiles[i]);
     } // for
+
+    GLoaderState.allocSegment(&ginfosel, 0);
+    GLoaderState.allocSegment(&linfosel, 0);
+    ginfo = (GINFOSEG *)GLoaderState.convert1616to32(ginfosel << 19);
+    linfo = (LINFOSEG *)GLoaderState.convert1616to32(linfosel << 19);
+    memset(ginfo, 0, sizeof(GINFOSEG));
+    memset(linfo, 0, sizeof(LINFOSEG));
+    ginfo->time = time(0);
+    struct tm *gtime = gmtime((time_t *)&ginfo->time);
+    ginfo->hour = gtime->tm_hour;
+    ginfo->minutes = gtime->tm_min;
+    ginfo->seconds = gtime->tm_sec;
+    ginfo->timezone = 0;
+    ginfo->cusecTimerInterval = 100;
+    ginfo->day = gtime->tm_mday;
+    ginfo->month = gtime->tm_mon;
+    ginfo->year = gtime->tm_year;
+    ginfo->weekday = gtime->tm_wday;
+    ginfo->uchMajorVersion = 20;
+    ginfo->uchMinorVersion = 40;
+    ginfo->sgCurrent = 1;
+    ginfo->sgMax = 99;
+    ginfo->cHugeShift = 0;
+    ginfo->fProtectModeOnly = 1;
+    ginfo->pidForeground = GLoaderState.pib.pib_ulpid;
+    ginfo->csecMaxWait = 1;
+    ginfo->cmsecMinSlice = 1;
+    ginfo->cmsecMaxSlice = 10;
+    ginfo->bootdrive = 3;
+    ginfo->csgWindowableVioMax = 99;
+    ginfo->csgPMMax = 99;
+    linfo->pidCurrent = GLoaderState.pib.pib_ulpid;
+    linfo->pidParent = GLoaderState.pib.pib_ulppid;
 }
 
 LX_NATIVE_DESTRUCTOR(doscalls)
@@ -3125,6 +3461,8 @@ LX_NATIVE_DESTRUCTOR(doscalls)
     HFiles = NULL;
     MaxHFiles = 0;
 
+    GLoaderState.freeSelector(ginfosel);
+    GLoaderState.freeSelector(linfosel);
     pthread_mutex_destroy(&GMutexDosCalls);
 }
 
