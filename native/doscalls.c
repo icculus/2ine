@@ -3407,13 +3407,18 @@ LX_NATIVE_CONSTRUCTOR(doscalls)
         initHFileInfoFromUnixFd(i, &HFiles[i]);
     } // for
 
-    GLoaderState.allocSegment(&ginfosel, 0);
-    GLoaderState.allocSegment(&linfosel, 0);
-    ginfo = (GINFOSEG *)GLoaderState.convert1616to32(ginfosel << 19);
-    linfo = (LINFOSEG *)GLoaderState.convert1616to32(linfosel << 19);
-    memset(ginfo, 0, sizeof(GINFOSEG));
-    memset(linfo, 0, sizeof(LINFOSEG));
-    ginfo->time = time(0);
+    FIXME("Maybe set this up in lx_loader and make it NULL in lib2ine");
+    FIXME("ginfo's time fields update in a timer interrupt!  :O");
+    ginfo = (GINFOSEG *) GLoaderState.allocSegment(&ginfosel, 0);
+    linfo = (LINFOSEG *) GLoaderState.allocSegment(&linfosel, 0);
+    if ((!ginfo) || (!linfo)) {
+        fprintf(stderr, "Failed to allocate info segments!\n");
+        abort();
+    }
+
+    memset(ginfo, '\0', sizeof (GINFOSEG));
+    memset(linfo, '\0', sizeof (LINFOSEG));
+    ginfo->time = time(NULL);
     struct tm *gtime = gmtime((time_t *)&ginfo->time);
     ginfo->hour = gtime->tm_hour;
     ginfo->minutes = gtime->tm_min;
@@ -3424,8 +3429,8 @@ LX_NATIVE_CONSTRUCTOR(doscalls)
     ginfo->month = gtime->tm_mon;
     ginfo->year = gtime->tm_year;
     ginfo->weekday = gtime->tm_wday;
-    ginfo->uchMajorVersion = 20;
-    ginfo->uchMinorVersion = 40;
+    ginfo->uchMajorVersion = 20; FIXME("are these backwards?");
+    ginfo->uchMinorVersion = 40; FIXME("are these backwards?");
     ginfo->sgCurrent = 1;
     ginfo->sgMax = 99;
     ginfo->cHugeShift = 0;
