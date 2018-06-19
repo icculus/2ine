@@ -3169,7 +3169,7 @@ APIRET16 Dos16SetSigHandler(PFN routine, PVOID prevaddress, PUSHORT prevaction, 
    return NO_ERROR;
 } 
 
-APIRET16 OS2API16 Dos16GetInfoSeg(PSEL globalseg, PSEL localseg)
+APIRET16 Dos16GetInfoSeg(PSEL globalseg, PSEL localseg)
 {
     TRACE_NATIVE("Dos16GetInfoSeg(%p, %p)", globalseg, localseg);
     if (globalseg) *globalseg = ginfosel << 3 | 7;

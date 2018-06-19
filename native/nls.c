@@ -11,7 +11,7 @@
 
 #include "nls-lx.h"
 
-APIRET16 DOSGETDBCSEV(USHORT buflen, PCOUNTRYCODE16 pcc, PCHAR buf)
+APIRET16 Dos16GetDBCSEv(USHORT buflen, PCOUNTRYCODE16 pcc, PCHAR buf)
 {
     // !!! FIXME: implement this for real.
     TRACE_NATIVE("Dos16GetDBCSEv(%u, %p, %p)", (uint) buflen, pcc, buf);
@@ -21,7 +21,7 @@ APIRET16 DOSGETDBCSEV(USHORT buflen, PCOUNTRYCODE16 pcc, PCHAR buf)
     return NO_ERROR;
 } // Dos16GetDBCSEv
 
-APIRET16 DOSCASEMAP(USHORT len, PCOUNTRYCODE16 pcc, PCHAR pch)
+APIRET16 Dos16CaseMap(USHORT len, PCOUNTRYCODE16 pcc, PCHAR pch)
 {
     TRACE_NATIVE("Dos16CaseMap(%u, %p, %p)", (uint) len, pcc, pch);
     if (!pcc) return ERROR_INVALID_PARAMETER;
@@ -32,7 +32,7 @@ APIRET16 DOSCASEMAP(USHORT len, PCOUNTRYCODE16 pcc, PCHAR pch)
     return ret;
 }
 
-APIRET16 DOSGETCTRYINFO(USHORT len, PCOUNTRYCODE16 pcc, PCOUNTRYINFO16 pch, PUSHORT dlen)
+APIRET16 Dos16GetCtryInfo(USHORT len, PCOUNTRYCODE16 pcc, PCOUNTRYINFO16 pch, PUSHORT dlen)
 {
     TRACE_NATIVE("Dos16GetCtryInfo(%u, %p, %p)",len, pcc, pch);
     if (!pcc || !pch || (len < 6)) return ERROR_INVALID_PARAMETER;

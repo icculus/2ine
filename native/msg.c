@@ -21,7 +21,7 @@ APIRET DosPutMessage(HFILE handle, ULONG msglen, PCHAR msg)
     return NO_ERROR;
 } // DosPutMessage
 
-APIRET16 DOSPUTMESSAGE(USHORT handle, USHORT msglen, PCHAR msg)
+APIRET16 Dos16PutMessage(USHORT handle, USHORT msglen, PCHAR msg)
 {
     TRACE_NATIVE("Dos16PutMessage(%u, %u, %p)", (uint) handle, (uint) msglen, msg);
     FIXME("really implement this");
@@ -29,7 +29,7 @@ APIRET16 DOSPUTMESSAGE(USHORT handle, USHORT msglen, PCHAR msg)
     return NO_ERROR;
 } // Dos16PutMessage
 
-APIRET16 DOSTRUEGETMESSAGE(PVOID pTable, USHORT cTable, PCHAR pData, USHORT cbBuf, USHORT msgnum, PCHAR pFilename, PUSHORT pcbMsg, PVOID msgseg)
+APIRET16 Dos16TrueGetMessage(PVOID pTable, USHORT cTable, PCHAR pData, USHORT cbBuf, USHORT msgnum, PCHAR pFilename, PUSHORT pcbMsg, PVOID msgseg)
 {
     TRACE_NATIVE("Dos16TrueGetMessage(%p, %u, %p, %u, %u, %p, %p, %p)", pTable, cTable, pData, cbBuf, msgnum, pFilename, pcbMsg, msgseg);
     void *msgdat = msgseg;
