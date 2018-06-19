@@ -20,7 +20,7 @@ APIRET16 KbdCharIn(PKBDKEYINFO pkbci, USHORT fWait, HKBD hkbd)
     return NO_ERROR;
 } // kbdCharIn
 
-APIRET16 KBDGETSTATUS(PKBDKEYINFO pkbci, HKBD hkbd)
+APIRET16 KbdGetStatus(PKBDKEYINFO pkbci, HKBD hkbd)
 {
     TRACE_NATIVE("KbdGetStatus(%p, %u)", pkbci, hkbd);
     FIXME("stub");
@@ -28,14 +28,14 @@ APIRET16 KBDGETSTATUS(PKBDKEYINFO pkbci, HKBD hkbd)
     return NO_ERROR;
 }
 
-APIRET16 KBDSETSTATUS(PKBDKEYINFO pkbci, HKBD hkbd)
+APIRET16 KbdSetStatus(PKBDKEYINFO pkbci, HKBD hkbd)
 {
     TRACE_NATIVE("KbdSetStatus(%p, %u)", pkbci, hkbd);
     FIXME("stub");
     return NO_ERROR;
 }
 
-APIRET16 KBDSTRINGIN(PCHAR pch, PSTRINGINBUF pchin, USHORT flag, HKBD hkbd)
+APIRET16 KbdStringIn(PCHAR pch, PSTRINGINBUF pchin, USHORT flag, HKBD hkbd)
 {
     TRACE_NATIVE("KbdStringIn(%p, %p, %u, %u)", pch, pchin, flag, hkbd);
     if (!pch) return ERROR_INVALID_PARAMETER;
