@@ -288,6 +288,7 @@ typedef struct LxLoaderState
     int running;
     int trace_native;
     int trace_events;
+    char *drives[26];  // mount points, A: through Z: ... NULL if unmounted.
     uint8 main_tib_selector;
     uint32 mainstacksize;
     uint16 original_cs;

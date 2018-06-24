@@ -13,6 +13,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
@@ -348,6 +349,190 @@ static void __attribute__((noreturn)) terminate_lib2ine(const uint32 exitcode)
 }
 
 
+static void cfgWarn(const char *fname, const int lineno, const char *fmt, ...)
+{
+    va_list ap;
+    fprintf(stderr, "2ine cfg warning: [%s:%d] ", fname, lineno);
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "\n");
+}
+
+static int cfgIsSpace(const int ch)
+{
+    switch (ch) { case ' ': case '\t': case '\r': case '\n': return 1; }
+    return 0;
+}
+
+static int cfgIsSymChar(const int ch)
+{
+    return ((ch == '_') || ((ch >= 'a') && (ch <= 'z')) || ((ch >= 'A') && (ch <= 'Z')));
+}
+
+static void cfgProcessDrive(const char *fname, const int lineno, const char *var, const char *val)
+{
+    char letter = var[0];
+    if ((letter >= 'a') && (letter <= 'z')) {
+        letter -= 'a' - 'A';
+    }
+
+    if ((letter < 'A') || (letter > 'Z') || (var[1] != '\0')) {
+        cfgWarn(fname, lineno, "Invalid drive \"%s\" (must be between 'A' and 'Z')", var);
+        return;
+    }
+
+    const int idx = (int) (letter - 'A');
+    free(GLoaderState.drives[idx]);  // in case we're overriding.
+    GLoaderState.drives[idx] = NULL;
+
+    if (*val != '\0') {  // val=="" means don't mount
+        struct stat statbuf;
+        if (stat(val, &statbuf) == -1) {
+            cfgWarn(fname, lineno, "Path \"%s\" for drive %c:\\ isn't accessible: %s", val, letter, strerror(errno));
+        } else if (!S_ISDIR(statbuf.st_mode)) {
+            cfgWarn(fname, lineno, "Path \"%s\" for drive %c:\\ isn't a directory", val, letter);
+        } else if ((GLoaderState.drives[idx] = strdup(val)) == NULL) {
+            cfgWarn(fname, lineno, "Out of memory!");
+        }
+    }
+}
+
+static void cfgProcessBoolString(const char *fname, const int lineno, int *output, const char *val)
+{
+    static const char *y[] = { "1", "yes", "y", "true", "t", "on" };
+    static const char *n[] = { "0", "no", "n", "false", "f", "off" };
+    int i;
+    for (i = 0; i < (sizeof (y) / sizeof (y[0])); i++) {
+        if (strcasecmp(val, y[i]) == 0) { *output = 1; return; }
+        if (strcasecmp(val, n[i]) == 0) { *output = 0; return; }
+    }
+    cfgWarn(fname, lineno, "\"%s\" is not valid for this setting. Try 1 or 0.", val);
+}
+
+static void cfgProcessSystem(const char *fname, const int lineno, const char *var, const char *val)
+{
+    if (strcmp(var, "trace_native") == 0) {
+        cfgProcessBoolString(fname, lineno, &GLoaderState.trace_native, val);
+    } else if (strcmp(var, "trace_events") == 0) {
+        cfgProcessBoolString(fname, lineno, &GLoaderState.trace_events, val);
+    } else {
+        cfgWarn(fname, lineno, "Unknown variable system.%s", var);
+    }
+}
+
+static void cfgProcessLine(const char *fname, const int lineno, const char *category, const char *var, const char *val)
+{
+    //printf("CFG: process line cat=%s var=%s, val=%s\n", category, var, val);
+    if ((*category == '\0') || (*var == '\0')) {
+        cfgWarn(fname, lineno, "Invalid configuration line");
+    } else if (strcmp(category, "drive") == 0) {
+        cfgProcessDrive(fname, lineno, var, val);
+    // eventually will map COM1, LPT1, NUL, etc.
+    //} else if (strcmp(category, "device") == 0) {
+    //    cfgProcessDevice(fname, lineno, var, val);
+    } else if (strcmp(category, "system") == 0) {
+        cfgProcessSystem(fname, lineno, var, val);
+    } else {
+        cfgWarn(fname, lineno, "Unknown category \"%s\"", category);
+    }
+}
+
+static void cfgLoad(const char *fname)
+{
+    FILE *io = fopen(fname, "r");
+    char *buffer = NULL;
+    size_t buflen = 0;
+    unsigned int lineno = 0;
+    ssize_t len;
+
+    if (io == NULL) {
+        return;
+    }
+
+    while ((len = getline(&buffer, &buflen, io)) >= 0) {
+        lineno++;
+
+        // strip whitespace and endlines off end of string.
+        while ((len > 0) && (cfgIsSpace(buffer[len-1]))) {
+            buffer[--len] = '\0';
+        }
+
+        //printf("CFG: fname=%s line=%d text=%s\n", fname, lineno, buffer);
+
+        #define SKIPSPACE() while (cfgIsSpace(*ptr)) { ptr++; }
+
+        char *ptr = buffer;
+        SKIPSPACE();
+        if ((*ptr == '\0') || (*ptr == ';') || (*ptr == '#') || ((ptr[0] == '/') && (ptr[1] == '/'))) {
+            //printf("CFG: comment or blank line\n");
+            continue;  // it's a comment or blank line, skip it.
+        }
+        const char *category = ptr;
+        while (cfgIsSymChar(*ptr)) { ptr++; }
+        if (*ptr != '.') {
+            cfgWarn(fname, lineno, "Invalid configuration line");
+            continue;
+        }
+        *(ptr++) = '\0';
+        const char *var = ptr;
+        while (cfgIsSymChar(*ptr)) { ptr++; }
+
+        if (*ptr == '=') {
+            *(ptr++) = '\0';
+        } else if (!cfgIsSpace(*ptr)) {
+            cfgWarn(fname, lineno, "Invalid configuration line");
+            continue;
+        } else {
+            *(ptr++) = '\0';
+            SKIPSPACE();
+            if (*ptr != '=') {
+                cfgWarn(fname, lineno, "Invalid configuration line");
+                continue;
+            }
+            ptr++;
+        }
+        SKIPSPACE();
+        const char *val = ptr;
+        #undef SKIPSPACE
+
+        cfgProcessLine(fname, lineno, category, var, val);
+    }
+
+    free(buffer);
+    fclose(io);
+}
+
+static void cfgLoadFiles(void)
+{
+    cfgLoad("/etc/2ine.cfg");
+
+    // optionally override or add config from user's config dir.
+    char *fname = NULL;
+    const char *env = getenv("XDG_CONFIG_HOME");
+    if (env) {
+        const size_t buflen = strlen(env) + 32;
+        fname = (char *) malloc(buflen);
+        if (fname) {
+            snprintf(fname, buflen, "%s/2ine/2ine.cfg", env);
+        }
+    } else {
+        env = getenv("HOME");
+        if (env) {
+            const size_t buflen = strlen(env) + 32;
+            fname = (char *) malloc(buflen);
+            if (fname) {
+                snprintf(fname, buflen, "%s/.config/2ine/2ine.cfg", env);
+            }
+        }
+    }
+
+    if (fname) {
+        cfgLoad(fname);
+        free(fname);
+    }
+}
+
 LX_NATIVE_CONSTRUCTOR(lib2ine)
 {
     if (pthread_key_create(&tlskey, NULL) != 0) {
@@ -371,6 +556,8 @@ LX_NATIVE_CONSTRUCTOR(lib2ine)
     GLoaderState.makeUnixPath = makeUnixPath_lib2ine;
     GLoaderState.terminate = terminate_lib2ine;
 
+    cfgLoadFiles();
+
     struct rlimit rlim;
     if (getrlimit(RLIMIT_STACK, &rlim) == -1) {
         rlim.rlim_cur = 8 * 1024 * 1024;  // oh well.
@@ -378,6 +565,7 @@ LX_NATIVE_CONSTRUCTOR(lib2ine)
     GLoaderState.initOs2Tib(GLoaderState.main_tibspace, &rlim, rlim.rlim_cur, 0);  // hopefully that's close enough on the stack address.
     GLoaderState.main_tib_selector = GLoaderState.setOs2Tib(GLoaderState.main_tibspace);
 
+    // these override config files (for now).
     if (getenv("TRACE_NATIVE")) {
         GLoaderState.trace_native = 1;
     }
@@ -395,12 +583,14 @@ LX_NATIVE_CONSTRUCTOR(lib2ine)
 
 LX_NATIVE_DESTRUCTOR(lib2ine)
 {
+    int i;
+    for (i = 0; i < (sizeof (GLoaderState.drives) / sizeof (GLoaderState.drives[0])); i++) {
+        free(GLoaderState.drives[i]);
+    }
     free(GLoaderState.pib.pib_pchenv);
     memset(&GLoaderState, '\0', sizeof (GLoaderState));
     pthread_key_delete(tlskey);
 }
 
-
 // end of lib2ine.c ...
-
 
