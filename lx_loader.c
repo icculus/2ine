@@ -2264,7 +2264,7 @@ static LxModule *loadNeModule(const char *fname, const uint8 *origexe, uint8 *ex
 
         // This needs to be set up now, so it's available to any library
         //  init code that runs in LX land.
-        void *topofstack = (void *) (((size_t) retval->mmaps[ne->reg_ss].addr) + sp);
+        void *topofstack = (void *) (((size_t) retval->mmaps[ne->reg_ss-1].addr) + sp);
         GLoaderState.initOs2Tib(GLoaderState.main_tibspace, topofstack, stacksize, 0);
         GLoaderState.main_tib_selector = GLoaderState.setOs2Tib(GLoaderState.main_tibspace);
     } // if
