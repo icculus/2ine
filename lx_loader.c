@@ -239,14 +239,27 @@ static char *lxMakeUnixPath(const char *os2path, uint32 *err)
 } // lxMakeUnixPath
 
 
+// So exepack2 sometimes copies between pieces of the destination buffer,
+//  but you can't memmove() since you actually want it to copy the data as
+//  it changes in case of overlap. But to prevent debugging tools from
+//  complaining about overlapping memcpy()'s, we just do a simple for-loop.
+static void linearmove(uint8 *dst, const uint8 *src, uint8 len)
+{
+    while (len--) {
+        *dst = *src;
+        dst++;
+        src++;
+    }
+} // linearmove
+
 /* this algorithm is from lxlite 138u. */
 static int decompressExePack2(uint8 *dst, const uint32 dstlen, const uint8 *src, const uint32 srclen)
 {
-    uint32 sOf = 0;
-    uint32 dOf = 0;
-    uint32 bOf = 0;
-    uint32 b1 = 0;
-    uint32 b2 = 0;
+    sint32 sOf = 0;
+    sint32 dOf = 0;
+    sint32 bOf = 0;
+    uint8 b1 = 0;
+    uint8 b2 = 0;
 
     #define SRCAVAIL(n) ((sOf + (n)) <= srclen)
     #define DSTAVAIL(n) ((dOf + (n)) <= dstlen)
@@ -289,11 +302,11 @@ static int decompressExePack2(uint8 *dst, const uint32 dstlen, const uint8 *src,
                 b2 = ((b1 >> 4) & 7) + 3;
                 b1 = ((b1 >> 2) & 3);
                 sOf += 2;
-                if (SRCAVAIL(b1) && DSTAVAIL(b1 + b2) && (dOf + b1 - bOf >= 0)) {
+                if (SRCAVAIL(b1) && DSTAVAIL(b1 + b2) && ((dOf + b1 - bOf) >= 0)) {
                     memcpy(dst + dOf, src + sOf, b1);
                     dOf += b1;
                     sOf += b1;
-                    memmove(dst + dOf, dst + (dOf - bOf), b2);
+                    linearmove(dst + dOf, dst + (dOf - bOf), b2);
                     dOf += b2;
                 } else {
                     return 0;
@@ -306,7 +319,7 @@ static int decompressExePack2(uint8 *dst, const uint32 dstlen, const uint8 *src,
                 bOf = (*((const uint16 *) (src + sOf))) >> 4;
                 b1 = ((b1 >> 2) & 3) + 3;
                 if (DSTAVAIL(b1) && (dOf - bOf >= 0)) {
-                    memmove(dst + dOf, dst + (dOf - bOf), b1);
+                    linearmove(dst + dOf, dst + (dOf - bOf), b1);
                     dOf += b1;
                     sOf += 2;
                 } else {
@@ -321,12 +334,12 @@ static int decompressExePack2(uint8 *dst, const uint32 dstlen, const uint8 *src,
                 b1 = (src[sOf] >> 2) & 0x0F;
                 bOf = (*((const uint16 *) (src + (sOf + 1)))) >> 4;
                 sOf += 3;
-                if (SRCAVAIL(b1) && DSTAVAIL(b1 + b2) && (dOf + b1 - bOf >= 0))
+                if (SRCAVAIL(b1) && DSTAVAIL(b1 + b2) && ((dOf + b1 - bOf) >= 0))
                 {
                     memcpy(dst + dOf, src + sOf, b1);
                     dOf += b1;
                     sOf += b1;
-                    memmove(dst + dOf, dst + (dOf - bOf), b2);
+                    linearmove(dst + dOf, dst + (dOf - bOf), b2);
                     dOf += b2;
                 } else {
                     return 0;
