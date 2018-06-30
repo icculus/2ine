@@ -44,7 +44,7 @@ while (readdir(DIRH)) {
         next if not /OS2APIINFO/;
         my $line = $_;
 
-        if (/\AOS2EXPORT\s+(.*?)\s+(OS2API|OS2API16)\s+(.*?)\((.*?)\)\s+OS2APIINFO\((.*?)\);/) {
+        if (/\AOS2EXPORT\s+(.*?)\s+(OS2API|OS2API16)\s+(.*?)\s*\((.*?)\)\s+OS2APIINFO\((.*?)\);/) {
             my %table = (
                 'rettype' => $1,
                 'apitype' => $2,
