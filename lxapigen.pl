@@ -2,6 +2,7 @@
 
 use warnings;
 use strict;
+use File::Basename;
 
 my %typesizes = (
     'LONG' => 4,
@@ -19,7 +20,8 @@ sub typesize {
     return $typesizes{$t};
 }
 
-my $dirname = defined $ARGV[0] ? $ARGV[0] : 'native';
+chdir(dirname(__FILE__)) or die("failed to chdir to script location: $!\n");
+my $dirname = 'native';
 opendir(DIRH, $dirname) or die("Failed to opendir '$dirname': $!\n");
 
 while (readdir(DIRH)) {
