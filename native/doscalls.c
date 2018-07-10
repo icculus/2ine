@@ -3151,6 +3151,7 @@ static DosBeepGeneratorInfo dos_beep_info;
 
 static int DosBeepGenerator(void *userdata, float *stream, int samples, int freq)
 {
+    const float beep_volume = GLoaderState.beep_volume;
     DosBeepGeneratorInfo *info = &dos_beep_info;
     assert(userdata == &dos_beep_info);
 
@@ -3177,7 +3178,7 @@ static int DosBeepGenerator(void *userdata, float *stream, int samples, int freq
             }
         } else {  // still generating the current piece of the square wave, mix it into the stream.
             // VMware emulates the PC Speaker on a sound card _really_ quietly.
-            const float val = info->positive ? 0.05f : -0.05f;
+            const float val = info->positive ? beep_volume : -beep_volume;
             int total = info->square_remaining;
             if (info->samples_remaining < total) total = info->samples_remaining;
             if (samples < total) total = samples;

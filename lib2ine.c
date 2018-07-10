@@ -384,6 +384,17 @@ static void cfgProcessBoolString(const char *fname, const int lineno, int *outpu
     cfgWarn(fname, lineno, "\"%s\" is not valid for this setting. Try 1 or 0.", val);
 }
 
+static void cfgProcessFloatString(const char *fname, const int lineno, float *output, const char *val)
+{
+    errno = 0;
+    const float converted = strtof(val, NULL);
+    if (!errno) {
+        *output = converted;
+    } else {
+        cfgWarn(fname, lineno, "\"%s\" is not valid for this setting. Try a number.", val);
+    }
+}
+
 static void cfgProcessMountPoint(const char *fname, const int lineno, const char *var, const char *val)
 {
     char letter = var[0];
@@ -426,6 +437,8 @@ static void cfgProcessSystem(const char *fname, const int lineno, const char *va
         cfgProcessBoolString(fname, lineno, &GLoaderState.trace_native, val);
     } else if (strcmp(var, "trace_events") == 0) {
         cfgProcessBoolString(fname, lineno, &GLoaderState.trace_events, val);
+    } else if (strcmp(var, "beep_volume") == 0) {
+        cfgProcessFloatString(fname, lineno, &GLoaderState.beep_volume, val);
     } else {
         cfgWarn(fname, lineno, "Unknown variable system.%s", var);
     }
@@ -817,6 +830,9 @@ LX_NATIVE_CONSTRUCTOR(lib2ine)
     GLoaderState.terminate = terminate_lib2ine;
     GLoaderState.registerAudioGenerator = registerAudioGenerator_lib2ine;
     GLoaderState.lib2ine_shutdown = lib2ine_shutdown;
+
+    // VMware emulates the PC Speaker on a sound card _really_ quietly.
+    GLoaderState.beep_volume = 0.05f;
 
     cfgLoadFiles();
     prepOs2Drives();
