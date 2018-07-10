@@ -78,6 +78,7 @@ typedef struct Window
     LONG y;
     LONG w;
     LONG h;
+    BOOL enabled;
 } Window;
 
 typedef struct MessageQueueItem
@@ -1623,6 +1624,56 @@ BOOL WinFillRect(HPS hps, PRECTL prcl, LONG lColor)
     SDL_RenderSetClipRect(renderer, NULL);
     return TRUE;
 } // WinFillRect
+
+BOOL WinIsWindow(HAB hab, HWND hwnd)
+{
+    TRACE_NATIVE("WinIsWindow(%u, %u)", (uint) hab, (uint) hwnd);
+    FIXME("this 'get the anchor, get the window, set errors' code is repeated a lot");
+    AnchorBlock *anchor = getAnchorBlockNoHAB();
+    if (!anchor) {
+        SET_WIN_ERROR_AND_RETURN(anchor, PMERR_INVALID_HWND, FALSE);
+    }
+
+    Window *win = getWindowFromHWND(anchor, hwnd);
+    if (!win) {
+        SET_WIN_ERROR_AND_RETURN(anchor, PMERR_INVALID_HWND, FALSE);
+    }
+
+    return TRUE;
+} // WinIsWindow
+
+BOOL WinIsWindowEnabled(HWND hwnd)
+{
+    TRACE_NATIVE("WinIsWindowEnabled(%u)", (uint) hwnd);
+    AnchorBlock *anchor = getAnchorBlockNoHAB();
+    if (!anchor) {
+        SET_WIN_ERROR_AND_RETURN(anchor, PMERR_INVALID_HWND, FALSE);
+    }
+
+    Window *win = getWindowFromHWND(anchor, hwnd);
+    if (!win) {
+        SET_WIN_ERROR_AND_RETURN(anchor, PMERR_INVALID_HWND, FALSE);
+    }
+
+    return win->enabled;
+} // WinIsWindowEnabled
+
+BOOL WinIsWindowVisible(HWND hwnd)
+{
+    TRACE_NATIVE("WinIsWindowVisible(%u)", (uint) hwnd);
+    AnchorBlock *anchor = getAnchorBlockNoHAB();
+    if (!anchor) {
+        SET_WIN_ERROR_AND_RETURN(anchor, PMERR_INVALID_HWND, FALSE);
+    }
+
+    Window *win = getWindowFromHWND(anchor, hwnd);
+    if (!win) {
+        SET_WIN_ERROR_AND_RETURN(anchor, PMERR_INVALID_HWND, FALSE);
+    }
+
+    return ((win->style & WS_VISIBLE) == WS_VISIBLE) ? TRUE : FALSE;
+} // WinIsWindowVisible
+
 
 // end of pmwin.c ...
 
