@@ -273,6 +273,13 @@ typedef struct LxPostTIB
     void *anchor_block;
 } LxPostTIB;
 
+// There are a few things that need access to the sound hardware:
+//  DosBeep(), MMOS/2, DART, basic system sounds, etc. We unify all this
+//  into a single SDL audio device open where possible, so that we don't
+//  have to deal with multiple devices, but that means it has to move into
+//  lib2ine so multiple libraries can access it.
+typedef int (*LxAudioGeneratorFn)(void *data, float *stream, int len, int freq);
+
 #define LXTIBSIZE (sizeof (LxTIB) + sizeof (LxTIB2) + sizeof (LxPostTIB))
 
 #define LX_MAX_LDT_SLOTS 8192
@@ -318,6 +325,8 @@ typedef struct LxLoaderState
     LxModule *(*loadModule)(const char *modname);
     char *(*makeUnixPath)(const char *os2path, uint32 *err);
     void __attribute__((noreturn)) (*terminate)(const uint32 exitcode);
+    int (*registerAudioGenerator)(LxAudioGeneratorFn fn, void *data, const int singleton);
+    void (*lib2ine_shutdown)(void);
 } LxLoaderState;
 
 typedef const LxExport *(*LxNativeModuleInitEntryPoint)(uint32 *lx_num_exports);

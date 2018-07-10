@@ -25,6 +25,7 @@
 #include "doscalls-lx.h"
 
 static pthread_mutex_t GMutexDosCalls;
+static pthread_mutex_t GMutexDosBeep;
 
 typedef struct ExitListItem
 {
@@ -3133,6 +3134,132 @@ APIRET DosDupHandle(HFILE hFile, PHFILE pHfile)
     return DosDupHandle_implementation(hFile, pHfile);
 } // DosDupHandle
 
+
+typedef struct DosBeepGeneratorInfo
+{
+    ULONG samples_remaining;
+    ULONG positive;
+    ULONG square_remaining;
+    ULONG square_length;
+    ULONG square_remainder;
+    ULONG accumulator;
+    ULONG next_freq;
+    ULONG next_duration;
+} DosBeepGeneratorInfo;
+
+static DosBeepGeneratorInfo dos_beep_info;
+
+static int DosBeepGenerator(void *userdata, float *stream, int samples, int freq)
+{
+    DosBeepGeneratorInfo *info = &dos_beep_info;
+    assert(userdata == &dos_beep_info);
+
+    while (samples > 0) {
+        if (!info->samples_remaining) {  // current beep command is finished?
+            if (!info->next_freq) {
+                return 0;  // out of things to play, remove ourselves from the mixer.
+            }
+
+            // set up next beep command.
+            info->square_length = ((ULONG) freq) / info->next_freq;
+            info->square_remainder = ((ULONG) freq) % info->next_freq;
+            info->samples_remaining = ((ULONG) ((info->next_duration / 1000.0) * ((ULONG) freq))) * 1;
+            info->accumulator = 0;
+            info->next_freq = 0;
+            info->next_duration = 0;
+        } else if (!info->square_remaining) {  // this part of the square wave is finished, flip it and start the next part.
+            info->positive = !info->positive;
+            info->square_remaining = info->square_length;
+            info->accumulator += info->square_remainder;
+            if (info->accumulator >= info->square_length) {
+                info->accumulator -= info->square_length;
+                info->square_remaining++;
+            }
+        } else {  // still generating the current piece of the square wave, mix it into the stream.
+            // VMware emulates the PC Speaker on a sound card _really_ quietly.
+            const float val = info->positive ? 0.05f : -0.05f;
+            int total = info->square_remaining;
+            if (info->samples_remaining < total) total = info->samples_remaining;
+            if (samples < total) total = samples;
+
+            FIXME("good candidate for SSE");
+            for (int i = 0; i < total; i++) {
+                stream[i] += val;
+            }
+
+            samples -= total;
+            info->samples_remaining -= total;
+            info->square_remaining -= total;
+            stream += total;
+        }
+    }
+
+    return 1;  // remain in the mixer to keep generating audio.
+} // DosBeepGenerator
+
+static APIRET DosBeep_implementation(ULONG freq, ULONG duration)
+{
+    if ((freq < 0x25) || (freq > 0x7FFF)) {
+        return ERROR_INVALID_FREQUENCY;
+    } else if (duration == 0) {
+        return NO_ERROR;
+    }
+
+    // Either OS/2 or Vmware seems to be doubling the frequency requested, I
+    //  think, as this sounds closer to what DosBeep() generates there.
+    //FIXME("sanity check this");
+    //freq *= 2;
+
+    // assuming OS/2 ran the PC Speaker off the BIOS timer, firing 18.2 times
+    //  a second (about 55 milliseconds), we'll round up the requested
+    //  duration to match.
+    FIXME("sanity check this");
+    const ULONG duration_diff = duration % 55;
+    const ULONG mix_duration = duration + (duration_diff ? (55 - duration_diff) : 0);
+
+    // we chain beep commands together and return a little before they'll
+    //  end, so the caller can queue another without a gap in playback if
+    //  they're making multiple calls to DosBeep to make a cute little tune.
+
+    // OS/2's implementation appears to hold a mutex while driving the PC
+    //  speaker; if you DosBeep() from two threads at once, one will block
+    //  until the other finishes playing.
+    grabLock(&GMutexDosBeep);
+
+    FIXME("should be atomic");
+    while (*((volatile ULONG *) &dos_beep_info.next_freq) != 0) {
+        usleep(1000);
+    }
+
+    dos_beep_info.next_duration = mix_duration;
+    dos_beep_info.next_freq = freq;
+
+    // wait about the time this was requested to play, but since there is
+    //  variance on when the audio thread will run again, and we padded out
+    //  the play time to 55 milliseconds, chances are good that the next
+    //  DosBeep call will queue more sound to play seamlessly.
+    // If less than 50 milliseconds, don't sleep at all; if they call DosBeep
+    //  again, it'll block until it can queue the command anyhow.
+    if (duration > 55) {
+        usleep((duration-55) * 1000);
+    }
+
+    const int rc = GLoaderState.registerAudioGenerator(DosBeepGenerator, &dos_beep_info, 1);
+    if (!rc) {
+        memset(&dos_beep_info, '\0', sizeof (dos_beep_info));  // oh well.
+    }
+
+    ungrabLock(&GMutexDosBeep);
+
+    return NO_ERROR;
+} // DosBeep_implementation
+
+APIRET DosBeep(ULONG freq, ULONG duration)
+{
+    TRACE_NATIVE("DosBeep(%u, %u)", freq, duration);
+    return DosBeep_implementation(freq, duration);
+} // DosBeep
+
 APIRET16 Dos16GetVersion(PUSHORT pver)
 {
     TRACE_NATIVE("Dos16GetVersion(%p)", pver);
@@ -3486,6 +3613,12 @@ APIRET16 Dos16ChgFilePtr(USHORT handle, LONG distance, USHORT whence, PULONG new
     return (APIRET16) DosSetFilePtr_implementation(handle, distance, whence, newoffset);
 } // Dos16ChgFilePtr
 
+APIRET16 Dos16Beep(USHORT freq, USHORT duration)
+{
+    TRACE_NATIVE("Dos16Beep(%u, %u)", freq, duration);
+    return DosBeep_implementation(freq, duration);
+} // Dos16Beep
+
 
 LX_NATIVE_CONSTRUCTOR(doscalls)
 {
@@ -3496,10 +3629,17 @@ LX_NATIVE_CONSTRUCTOR(doscalls)
         abort();
     } // if
 
+    if (pthread_mutex_init(&GMutexDosBeep, NULL) == -1) {
+        pthread_mutex_destroy(&GMutexDosCalls);
+        fprintf(stderr, "pthread_mutex_init failed!\n");
+        abort();
+    } // if
+
     MaxHFiles = 20;  // seems to be OS/2's default.
     HFiles = (HFileInfo *) malloc(sizeof (HFileInfo) * MaxHFiles);
     if (!HFiles) {
         pthread_mutex_destroy(&GMutexDosCalls);
+        pthread_mutex_destroy(&GMutexDosBeep);
         fprintf(stderr, "Out of memory!\n");
         abort();
     } // if
@@ -3532,6 +3672,8 @@ LX_NATIVE_CONSTRUCTOR(doscalls)
     ginfo = (GINFOSEG *) GLoaderState.allocSegment(&ginfosel, 0);
     linfo = (LINFOSEG *) GLoaderState.allocSegment(&linfosel, 0);
     if ((!ginfo) || (!linfo)) {
+        pthread_mutex_destroy(&GMutexDosCalls);
+        pthread_mutex_destroy(&GMutexDosBeep);
         fprintf(stderr, "Failed to allocate info segments!\n");
         abort();
     }
@@ -3589,6 +3731,7 @@ LX_NATIVE_DESTRUCTOR(doscalls)
     GLoaderState.freeSelector(ginfosel);
     GLoaderState.freeSelector(linfosel);
     pthread_mutex_destroy(&GMutexDosCalls);
+    pthread_mutex_destroy(&GMutexDosBeep);
 }
 
 // end of doscalls.c ...

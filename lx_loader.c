@@ -667,6 +667,8 @@ static void freeLxModule(LxModule *lxmod);
 
 static __attribute__((noreturn)) void lxTerminate(const uint32 exitcode)
 {
+    GLoaderState.lib2ine_shutdown();
+
     // free the actual .exe
     freeLxModule(GLoaderState.main_module);
 

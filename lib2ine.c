@@ -23,8 +23,10 @@
 #include <pthread.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <assert.h>
 
 #include "lib2ine.h"
+#include "SDL.h"
 
 extern char **environ;
 
@@ -640,6 +642,157 @@ static void prepOs2Drives(void)
     #endif
 }
 
+typedef struct LxAudioGeneratorInfo
+{
+    LxAudioGeneratorFn fn;
+    void *data;
+    struct LxAudioGeneratorInfo *next;
+} LxAudioGeneratorInfo;
+
+static LxAudioGeneratorInfo *audio_generators = NULL;
+static SDL_AudioDeviceID sdl_audio_device = 0;
+static SDL_AudioSpec sdl_audio_spec;
+static Uint32 no_audio_generators_timeout = 0;
+
+static int SDLCALL closeAudioDeviceThread(void *arg)
+{
+    const SDL_AudioDeviceID dev = (SDL_AudioDeviceID) (size_t) arg;
+    //printf("2ine: Closing idle audio device %u.\n", (uint) dev);
+    SDL_CloseAudioDevice(dev);
+    return 0;
+}
+
+static void closeAudioDeviceFromAnotherThread(void)
+{
+    FIXME("Make this atomic");
+    const SDL_AudioDeviceID dev = sdl_audio_device;
+    if (!sdl_audio_device) {
+        return;
+    }
+    sdl_audio_device = 0;
+
+    SDL_Thread *thread = SDL_CreateThread(closeAudioDeviceThread, "2ine_close_audio_device", (void *) (size_t) dev);
+    if (thread) {
+        SDL_DetachThread(thread);
+    } else {
+        sdl_audio_device = dev;  // oh well.
+    }
+}
+
+
+static void SDLCALL audioCallback(void *userdata, Uint8 *stream, int len)
+{
+    memset(stream, '\0', len);
+    LxAudioGeneratorInfo *generator = audio_generators;
+    if (!generator) {
+        if (!no_audio_generators_timeout) {
+            no_audio_generators_timeout = SDL_GetTicks() + 5000;
+        } else if (SDL_TICKS_PASSED(SDL_GetTicks(), no_audio_generators_timeout)) {
+            closeAudioDeviceFromAnotherThread();
+        }
+        return;
+    }
+
+    no_audio_generators_timeout = 0;
+
+    const int samples = len / sizeof (float);
+    LxAudioGeneratorInfo *prev = NULL;
+    while (generator) {
+        LxAudioGeneratorInfo *next = generator->next;
+        if (generator->fn(generator->data, (float *) stream, samples, sdl_audio_spec.freq)) {
+            prev = generator;
+        } else {
+            // remove this generator, it's done.
+            if (prev) {
+                prev->next = next;
+            } else {
+                assert(generator == audio_generators);
+                audio_generators = next;
+            }
+            free(generator);
+        }
+        generator = next;
+    }
+}
+
+static int registerAudioGenerator_lib2ine(LxAudioGeneratorFn fn, void *data, const int singleton)
+{
+    if (!sdl_audio_device) {
+        SDL_Init(SDL_INIT_AUDIO);
+        SDL_AudioSpec spec;
+        SDL_zero(spec);
+        spec.freq = 48000;
+        spec.format = AUDIO_F32SYS;
+        spec.channels = 1;
+        spec.samples = 1024;
+        spec.callback = audioCallback;
+        sdl_audio_device = SDL_OpenAudioDevice(NULL, 0, &spec, &sdl_audio_spec, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+        if (!sdl_audio_device) {
+            SDL_QuitSubSystem(SDL_INIT_AUDIO);
+            return 0;
+        }
+        no_audio_generators_timeout = 0;
+        SDL_PauseAudioDevice(sdl_audio_device, 0);
+    }
+
+    LxAudioGeneratorInfo *info = (LxAudioGeneratorInfo *) malloc(sizeof (LxAudioGeneratorInfo *));
+    if (!info) {
+        return 0;
+    }
+
+    info->fn = fn;
+    info->data = data;
+
+    SDL_LockAudioDevice(sdl_audio_device);
+
+    if (singleton) {
+        for (LxAudioGeneratorInfo *i = audio_generators; i != NULL; i = i->next) {
+            if (i->fn == fn) {
+                SDL_UnlockAudioDevice(sdl_audio_device);
+                free(info);
+                return 2;   // already added.
+            }
+        }
+    }
+
+    no_audio_generators_timeout = 0;
+    info->next = audio_generators;
+    audio_generators = info;
+    SDL_UnlockAudioDevice(sdl_audio_device);
+    return 1;
+} // registerAudioGenerator_lib2ine
+
+
+static void lib2ine_shutdown(void)
+{
+    if (sdl_audio_device) {
+        // let the audio callback run about two more times, to let any last queued things fully render.
+        SDL_Delay(((sdl_audio_spec.samples * 1000) / sdl_audio_spec.freq) * 2);
+        SDL_CloseAudioDevice(sdl_audio_device);
+        SDL_QuitSubSystem(SDL_INIT_AUDIO);
+        sdl_audio_device = 0;
+    }
+
+    LxAudioGeneratorInfo *generator = audio_generators;
+    audio_generators = NULL;
+    while (generator) {
+        LxAudioGeneratorInfo *next = generator->next;
+        free(generator);
+        generator = next;
+    }
+
+    for (int i = 0; i < (sizeof (GLoaderState.disks) / sizeof (GLoaderState.disks[0])); i++) {
+        free(GLoaderState.disks[i]);
+        GLoaderState.disks[i] = NULL;
+    }
+
+    free(GLoaderState.pib.pib_pchenv);
+    GLoaderState.pib.pib_pchenv = NULL;
+
+    memset(&GLoaderState, '\0', sizeof (GLoaderState));
+    pthread_key_delete(tlskey);
+}
+
 LX_NATIVE_CONSTRUCTOR(lib2ine)
 {
     if (pthread_key_create(&tlskey, NULL) != 0) {
@@ -662,6 +815,8 @@ LX_NATIVE_CONSTRUCTOR(lib2ine)
     GLoaderState.loadModule = loadModule_lib2ine;
     GLoaderState.makeUnixPath = makeUnixPath_lib2ine;
     GLoaderState.terminate = terminate_lib2ine;
+    GLoaderState.registerAudioGenerator = registerAudioGenerator_lib2ine;
+    GLoaderState.lib2ine_shutdown = lib2ine_shutdown;
 
     cfgLoadFiles();
     prepOs2Drives();
@@ -689,13 +844,7 @@ LX_NATIVE_CONSTRUCTOR(lib2ine)
 
 LX_NATIVE_DESTRUCTOR(lib2ine)
 {
-    for (int i = 0; i < (sizeof (GLoaderState.disks) / sizeof (GLoaderState.disks[0])); i++) {
-        free(GLoaderState.disks[i]);
-        GLoaderState.disks[i] = NULL;
-    }
-    free(GLoaderState.pib.pib_pchenv);
-    memset(&GLoaderState, '\0', sizeof (GLoaderState));
-    pthread_key_delete(tlskey);
+    lib2ine_shutdown();
 }
 
 // end of lib2ine.c ...

@@ -72,6 +72,12 @@ static APIRET16 bridge16to32_Dos16GetMachineMode(uint8 *args) {
     return Dos16GetMachineMode(pmode);
 }
 
+static APIRET16 bridge16to32_Dos16Beep(uint8 *args) {
+    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, dur);
+    LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, freq);
+    return Dos16Beep(freq, dur);
+}
+
 static APIRET16 bridge16to32_Dos16ChDir(uint8 *args) {
     LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(ULONG, res);
     LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PSZ, pszDir);
@@ -264,6 +270,7 @@ LX_NATIVE_MODULE_16BIT_SUPPORT()
     LX_NATIVE_MODULE_16BIT_API(Dos16FreeSeg)
     LX_NATIVE_MODULE_16BIT_API(Dos16GetHugeShift)
     LX_NATIVE_MODULE_16BIT_API(Dos16GetMachineMode)
+    LX_NATIVE_MODULE_16BIT_API(Dos16Beep)
     LX_NATIVE_MODULE_16BIT_API(Dos16ChDir)
     LX_NATIVE_MODULE_16BIT_API(Dos16ChgFilePtr)
     LX_NATIVE_MODULE_16BIT_API(Dos16Close)
@@ -308,6 +315,7 @@ static int init16_doscalls(void) {
         LX_NATIVE_INIT_16BIT_BRIDGE(Dos16FreeSeg, 2)
         LX_NATIVE_INIT_16BIT_BRIDGE(Dos16GetHugeShift, 4)
         LX_NATIVE_INIT_16BIT_BRIDGE(Dos16GetMachineMode, 4)
+        LX_NATIVE_INIT_16BIT_BRIDGE(Dos16Beep, 4)
         LX_NATIVE_INIT_16BIT_BRIDGE(Dos16ChDir, 8)
         LX_NATIVE_INIT_16BIT_BRIDGE(Dos16ChgFilePtr, 12)
         LX_NATIVE_INIT_16BIT_BRIDGE(Dos16Close, 2)
@@ -349,6 +357,7 @@ LX_NATIVE_MODULE_INIT({ if (!init16_doscalls()) return 0; })
     LX_NATIVE_EXPORT16(Dos16FreeSeg, 39),
     LX_NATIVE_EXPORT16(Dos16GetHugeShift, 41),
     LX_NATIVE_EXPORT16(Dos16GetMachineMode, 49),
+    LX_NATIVE_EXPORT16(Dos16Beep, 50),
     LX_NATIVE_EXPORT16(Dos16ChDir, 57),
     LX_NATIVE_EXPORT16(Dos16ChgFilePtr, 58),
     LX_NATIVE_EXPORT16(Dos16Close, 59),
@@ -404,6 +413,7 @@ LX_NATIVE_MODULE_INIT({ if (!init16_doscalls()) return 0; })
     LX_NATIVE_EXPORT(DosRead, 281),
     LX_NATIVE_EXPORT(DosWrite, 282),
     LX_NATIVE_EXPORT(DosExecPgm, 283),
+    LX_NATIVE_EXPORT(DosBeep, 286),
     LX_NATIVE_EXPORT(DosSetProcessCp, 289),
     LX_NATIVE_EXPORT(DosQueryCp, 291),
     LX_NATIVE_EXPORT(DosExitList, 296),

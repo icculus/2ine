@@ -96,8 +96,10 @@ target_link_libraries(viocalls ncursesw)
 
 # !!! FIXME: clean this up/
 if(LX_LEGACY)
+    target_link_libraries(2ine "${CMAKE_CURRENT_SOURCE_DIR}/libSDL2-2.0.so.0")
     target_link_libraries(pmwin "${CMAKE_CURRENT_SOURCE_DIR}/libSDL2-2.0.so.0")
 else()
+    target_link_libraries(2ine "SDL2")
     target_link_libraries(pmwin "SDL2")
 endif()
 
