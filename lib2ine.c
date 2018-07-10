@@ -370,34 +370,6 @@ static int cfgIsSymChar(const int ch)
     return ((ch == '_') || ((ch >= 'a') && (ch <= 'z')) || ((ch >= 'A') && (ch <= 'Z')));
 }
 
-static void cfgProcessDrive(const char *fname, const int lineno, const char *var, const char *val)
-{
-    char letter = var[0];
-    if ((letter >= 'a') && (letter <= 'z')) {
-        letter -= 'a' - 'A';
-    }
-
-    if ((letter < 'A') || (letter > 'Z') || (var[1] != '\0')) {
-        cfgWarn(fname, lineno, "Invalid drive \"%s\" (must be between 'A' and 'Z')", var);
-        return;
-    }
-
-    const int idx = (int) (letter - 'A');
-    free(GLoaderState.drives[idx]);  // in case we're overriding.
-    GLoaderState.drives[idx] = NULL;
-
-    if (*val != '\0') {  // val=="" means don't mount
-        struct stat statbuf;
-        if (stat(val, &statbuf) == -1) {
-            cfgWarn(fname, lineno, "Path \"%s\" for drive %c:\\ isn't accessible: %s", val, letter, strerror(errno));
-        } else if (!S_ISDIR(statbuf.st_mode)) {
-            cfgWarn(fname, lineno, "Path \"%s\" for drive %c:\\ isn't a directory", val, letter);
-        } else if ((GLoaderState.drives[idx] = strdup(val)) == NULL) {
-            cfgWarn(fname, lineno, "Out of memory!");
-        }
-    }
-}
-
 static void cfgProcessBoolString(const char *fname, const int lineno, int *output, const char *val)
 {
     static const char *y[] = { "1", "yes", "y", "true", "t", "on" };
@@ -408,6 +380,42 @@ static void cfgProcessBoolString(const char *fname, const int lineno, int *outpu
         if (strcasecmp(val, n[i]) == 0) { *output = 0; return; }
     }
     cfgWarn(fname, lineno, "\"%s\" is not valid for this setting. Try 1 or 0.", val);
+}
+
+static void cfgProcessMountPoint(const char *fname, const int lineno, const char *var, const char *val)
+{
+    char letter = var[0];
+    if ((letter >= 'a') && (letter <= 'z')) {
+        letter -= 'a' - 'A';
+    }
+
+    if ((letter < 'A') || (letter > 'Z') || (var[1] != '\0')) {
+        cfgWarn(fname, lineno, "Invalid disk \"%s\" (must be between 'A' and 'Z')", var);
+        return;
+    }
+
+    const int idx = (int) (letter - 'A');
+    free(GLoaderState.disks[idx]);  // in case we're overriding.
+    GLoaderState.disks[idx] = NULL;
+
+    if (*val != '\0') {  // val=="" means don't mount
+        const size_t vallen = strlen(val);
+        struct stat statbuf;
+        if (stat(val, &statbuf) == -1) {
+            cfgWarn(fname, lineno, "Path \"%s\" for drive %c:\\ isn't accessible: %s", val, letter, strerror(errno));
+        } else if (!S_ISDIR(statbuf.st_mode)) {
+            cfgWarn(fname, lineno, "Path \"%s\" for drive %c:\\ isn't a directory", val, letter);
+        } else if ((GLoaderState.disks[idx] = (char *) malloc(vallen + 2)) == NULL) {
+            cfgWarn(fname, lineno, "Out of memory!");
+        } else {
+            char *ptr = GLoaderState.disks[idx];
+            strcpy(ptr, val);
+            if (ptr[vallen - 1] != '/') {
+                ptr[vallen] = '/';
+                ptr[vallen+1] = '\0';
+            }
+        }
+    }
 }
 
 static void cfgProcessSystem(const char *fname, const int lineno, const char *var, const char *val)
@@ -426,8 +434,8 @@ static void cfgProcessLine(const char *fname, const int lineno, const char *cate
     //printf("CFG: process line cat=%s var=%s, val=%s\n", category, var, val);
     if ((*category == '\0') || (*var == '\0')) {
         cfgWarn(fname, lineno, "Invalid configuration line");
-    } else if (strcmp(category, "drive") == 0) {
-        cfgProcessDrive(fname, lineno, var, val);
+    } else if (strcmp(category, "mountpoint") == 0) {
+        cfgProcessMountPoint(fname, lineno, var, val);
     // eventually will map COM1, LPT1, NUL, etc.
     //} else if (strcmp(category, "device") == 0) {
     //    cfgProcessDevice(fname, lineno, var, val);
@@ -533,6 +541,105 @@ static void cfgLoadFiles(void)
     }
 }
 
+static void prepOs2Drives(void)
+{
+    const int drive_c = 'C' - 'A';
+    const int total = (sizeof (GLoaderState.disks) / sizeof (GLoaderState.disks[0]));
+    uint32 diskmap = 0;
+    int lowestmounted = 0;
+    int lowestcwd = 0;
+    int i;
+
+    FIXME("need to pass current dirs and disks to OS/2 subprocesses");
+
+    char *cwd = getcwd(NULL, 0);
+    char *rp = cwd ? realpath(cwd, NULL) : NULL;  // in case there's a symlink in there.
+    if ((cwd == NULL) || (rp == NULL)) {
+        fprintf(stderr, "Can't get cwd (%s), defaulting to \"/\".\n", strerror(errno));
+        rp = strdup("/");
+        chdir(rp);
+    }
+
+    free(cwd);
+    cwd = rp;
+
+    for (i = 0; i < total; i++) {
+        if (GLoaderState.disks[i] == NULL) {
+            continue;
+        }
+
+        rp = realpath(GLoaderState.disks[i], NULL);
+        if (rp == NULL) {
+            fprintf(stderr, "Can't realpath \"%s\" (%s), not mounting %c:\\\n", GLoaderState.disks[i], strerror(errno), i + 'A');
+            free(GLoaderState.disks[i]);
+            GLoaderState.disks[i] = NULL;
+            continue;
+        }
+
+        if (lowestmounted < 3) {
+            lowestmounted = i + 1;
+        }
+
+        diskmap |= (1 << i);
+
+        const size_t rplen = strlen(rp);
+        assert(rplen > 0);
+        if ((strncmp(rp, cwd, rplen) == 0) && ((rp[rplen-1] == '/') || (cwd[rplen] == '/') || (cwd[rplen] == '\0'))) {
+            // our cwd is under this mount point!
+            const char *d = cwd + rplen;
+            GLoaderState.current_dir[i] = strdup((*d == '/') ? d + 1 : d);
+            char *ptr = GLoaderState.current_dir[i];
+            while (*ptr) {  // make current dir an OS/2-style relative path.
+                if (*ptr == '/') {
+                    *ptr = '\\';
+                }
+                ptr++;
+            }
+
+            if (lowestcwd < 3) {
+                lowestcwd = i + 1;
+            }
+        } else {
+            // current directory isn't under this mount point, just make it the root.
+            GLoaderState.current_dir[i] = strdup("");
+        }
+        free(rp);
+    }
+
+    if (!lowestmounted) {
+        // if no disks are mapped at all, just map the Unix root filesystem to C:
+        GLoaderState.disks[drive_c] = strdup("/");
+        char *ptr = strdup(cwd + 1);  // skip the initial '/'
+        GLoaderState.current_dir[drive_c] = ptr;
+        while (*ptr) {  // make current dir an OS/2-style relative path.
+            if (*ptr == '/') {
+                *ptr = '\\';
+            }
+            ptr++;
+        }
+        GLoaderState.current_disk = drive_c + 1;
+    } else if (!lowestcwd) {
+        // your actual cwd isn't under any mountpoint, so pick the first mounted drive we
+        //  saw, starting with C:\, unless we only have A:\ or B:\, then use one of those.
+        GLoaderState.current_disk = lowestmounted;
+    } else {
+        GLoaderState.current_disk = lowestcwd;
+    }
+
+    free(cwd);
+
+    GLoaderState.diskmap = diskmap;
+
+    #if 0
+    fprintf(stderr, "OS/2 disks:\n");
+    for (i = 0; i < total; i++) {
+        if (GLoaderState.disks[i] == NULL) continue;
+        fprintf(stderr, "  %c: -> mountpoint='%s' cwd='%s' current=%d\n", 'A' + i, GLoaderState.disks[i], GLoaderState.current_dir[i], GLoaderState.current_disk == (i+1));
+    }
+    fprintf(stderr, "\n");
+    #endif
+}
+
 LX_NATIVE_CONSTRUCTOR(lib2ine)
 {
     if (pthread_key_create(&tlskey, NULL) != 0) {
@@ -557,6 +664,7 @@ LX_NATIVE_CONSTRUCTOR(lib2ine)
     GLoaderState.terminate = terminate_lib2ine;
 
     cfgLoadFiles();
+    prepOs2Drives();
 
     struct rlimit rlim;
     if (getrlimit(RLIMIT_STACK, &rlim) == -1) {
@@ -583,9 +691,9 @@ LX_NATIVE_CONSTRUCTOR(lib2ine)
 
 LX_NATIVE_DESTRUCTOR(lib2ine)
 {
-    int i;
-    for (i = 0; i < (sizeof (GLoaderState.drives) / sizeof (GLoaderState.drives[0])); i++) {
-        free(GLoaderState.drives[i]);
+    for (int i = 0; i < (sizeof (GLoaderState.disks) / sizeof (GLoaderState.disks[0])); i++) {
+        free(GLoaderState.disks[i]);
+        GLoaderState.disks[i] = NULL;
     }
     free(GLoaderState.pib.pib_pchenv);
     memset(&GLoaderState, '\0', sizeof (GLoaderState));

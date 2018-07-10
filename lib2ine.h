@@ -288,7 +288,10 @@ typedef struct LxLoaderState
     int running;
     int trace_native;
     int trace_events;
-    char *drives[26];  // mount points, A: through Z: ... NULL if unmounted.
+    char *disks[26];  // mount points, A: through Z: ... NULL if unmounted.
+    char *current_dir[26];  // current directory, per-disk, A: through Z: ... NULL if unmounted.
+    int current_disk;  // 1==A:\\, 2==B:\\, etc.
+    uint32 diskmap;  // 1<<0==drive A mounted, 1<<1==drive B mounted, etc.
     uint8 main_tib_selector;
     uint32 mainstacksize;
     uint16 original_cs;

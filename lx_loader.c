@@ -200,38 +200,55 @@ static int locatePathCaseInsensitive(char *buf)
 
 static char *lxMakeUnixPath(const char *os2path, uint32 *err)
 {
+    const char *mountpoint = NULL;
+    const char *cwd = NULL;
+
+    FIXME("map devices in 2ine.cfg");
     if ((strcasecmp(os2path, "NUL") == 0) || (strcasecmp(os2path, "\\DEV\\NUL") == 0))
         os2path = "/dev/null";
     // !!! FIXME: emulate other OS/2 device names (CON, etc).
     //else if (strcasecmp(os2path, "CON") == 0)
     else {
         char drive = os2path[0];
-        if ((drive >= 'a') && (drive <= 'z'))
+        if ((drive >= 'a') && (drive <= 'z')) {
             drive += 'A' - 'a';
+        }
 
-        if ((drive >= 'A') && (drive <= 'Z')) {
-            if (os2path[1] == ':') {  // it's a drive letter.
-                if (drive == 'C')
-                    os2path += 2;  // skip "C:" if it's there.
-                else {
-                    *err = 26; //ERROR_NOT_DOS_DISK;
-                    return NULL;
-                } // else
-            } // if
-        } // if
-    } // else
+        if (((drive >= 'A') && (drive <= 'Z')) && (os2path[1] == ':')) {  // it's a drive letter.
+            os2path += 2;  // skip "C:"
+        } else {
+            drive = (GLoaderState.current_disk-1) + 'A';
+        }
 
-    const size_t len = strlen(os2path);
-    char *retval = (char *) malloc(len + 1);
+        const int driveidx = drive - 'A';
+        mountpoint = GLoaderState.disks[driveidx];
+        if (!mountpoint) {
+            *err = 26; //ERROR_NOT_DOS_DISK;
+            return NULL;
+        }
+
+        if (*os2path != '\\') {
+            cwd = GLoaderState.current_dir[driveidx];
+        }
+    }
+
+    const size_t len = (mountpoint ? strlen(mountpoint) : 0) + (cwd ? strlen(cwd) : 0) + strlen(os2path) + 3;
+    char *retval = (char *) malloc(len);
     if (!retval) {
         *err = 8;  //ERROR_NOT_ENOUGH_MEMORY;
         return NULL;
-    } // else
+    }
 
-    strcpy(retval, os2path);
+    snprintf(retval, len, "%s%s%s%s%s", mountpoint ? mountpoint : "", cwd ? "/" : "", cwd ? cwd : "", ((!*os2path) || (*os2path == '/')) ? "" : "/", os2path);
 
     for (char *ptr = strchr(retval, '\\'); ptr; ptr = strchr(ptr + 1, '\\'))
         *ptr = '/';  // convert to Unix-style path separators.
+
+    FIXME("this could be more efficient");
+    char *ptr = retval;
+    while ((ptr = strstr(ptr, "//")) != NULL) {
+        memmove(ptr, ptr + 1, strlen(ptr));
+    }
 
     locatePathCaseInsensitive(retval);
 
