@@ -200,9 +200,9 @@ APIRET DosQuerySysInfo(ULONG first, ULONG last, PVOID _buf, ULONG buflen)
             case QSV_MAX_SLICE: *(buf++) = 10; break;
             case QSV_PAGE_SIZE: *(buf++) = 4096; break;
             // !!! FIXME: change the version number in some way so apps can know this isn't actually OS/2.
-            case QSV_VERSION_MAJOR: *(buf++) = 20; break;   // OS/2 Warp 4.0
-            case QSV_VERSION_MINOR: *(buf++) = 40; break;   // OS/2 Warp 4.0
-            case QSV_VERSION_REVISION: *(buf++) = 0; break; // OS/2 Warp 4.0
+            case QSV_VERSION_MAJOR: *(buf++) = 20; break;   // OS/2 Warp 4.5
+            case QSV_VERSION_MINOR: *(buf++) = 45; break;   // OS/2 Warp 4.5
+            case QSV_VERSION_REVISION: *(buf++) = 0; break; // OS/2 Warp 4.5
 
             case QSV_MS_COUNT: {
                 static long startoffset = 0;
@@ -3264,9 +3264,8 @@ APIRET16 Dos16GetVersion(PUSHORT pver)
 {
     TRACE_NATIVE("Dos16GetVersion(%p)", pver);
     uint8 *bytes = (uint8 *) pver;
-    FIXME("better version here?");
-    bytes[0] = 2;
-    bytes[1] = 4;
+    bytes[0] = 45;  // OS/2 Warp 4.52 reports this.
+    bytes[1] = 20;
     return NO_ERROR;
 } // Dos16GetVersion
 
