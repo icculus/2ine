@@ -358,7 +358,7 @@ static ULONG currentSystemTicks(void)
 
 HAB WinInitialize(ULONG flOptions)
 {
-    TRACE_NATIVE("WinInitialize(%u)", (unsigned int) flOptions);
+    TRACE_NATIVE("WinInitialize(%u)", (uint) flOptions);
 
     if (flOptions != 0) {
         return NULLHANDLE;  // reserved; must be zero.
@@ -426,7 +426,7 @@ static MRESULT sendMessage(Window *win, ULONG msg, MPARAM mp1, MPARAM mp2)
     if (!winproc) {
         winproc = WinDefWindowProc;
     }
-    TRACE_EVENT("EVENT SEND { hwnd=%u, msg=%u (%s), mp1=%p, mp2=%p, proc=%p }", (unsigned int) win->hwnd, (unsigned int) msg, messageName(msg), mp1, mp2, winproc);
+    TRACE_EVENT("EVENT SEND { hwnd=%u, msg=%u (%s), mp1=%p, mp2=%p, proc=%p }", (uint) win->hwnd, (uint) msg, messageName(msg), mp1, mp2, winproc);
     return winproc(win->hwnd, msg, mp1, mp2);
 } // sendMessage
 
@@ -441,7 +441,7 @@ static BOOL destroyMessageQueue(AnchorBlock *anchor)
         next = i->next;
         free(i);
     }
-    TRACE_EVENT("HMQ %u destroyed", (unsigned int) anchor->message_queue.hmq);
+    TRACE_EVENT("HMQ %u destroyed", (uint) anchor->message_queue.hmq);
     memset(&anchor->message_queue, '\0', sizeof (MessageQueue));
     return TRUE;
 } // destroyMessageQueue
@@ -501,7 +501,7 @@ static void destroyPresentationSpace(AnchorBlock *anchor, PresentationSpace *ps)
 
 BOOL WinTerminate(HAB hab)
 {
-    TRACE_NATIVE("WinTerminate(%u)", (unsigned int) hab);
+    TRACE_NATIVE("WinTerminate(%u)", (uint) hab);
     AnchorBlock *anchor = getAnchorBlock(hab);
     if (!anchor) {
         return FALSE;
@@ -538,7 +538,7 @@ BOOL WinTerminate(HAB hab)
 
 ERRORID WinGetLastError(HAB hab)
 {
-    TRACE_NATIVE("WinGetLastError(%u)", (unsigned int) hab);
+    TRACE_NATIVE("WinGetLastError(%u)", (uint) hab);
     AnchorBlock *anchor = getAnchorBlock(hab);
     if (!anchor) {
         return PMERR_INVALID_HAB;
@@ -549,7 +549,7 @@ ERRORID WinGetLastError(HAB hab)
 
 HMQ WinCreateMsgQueue(HAB hab, LONG cmsg)
 {
-    TRACE_NATIVE("WinCreateMsgQueue(%u, %d)", (unsigned int) hab, (int) cmsg);
+    TRACE_NATIVE("WinCreateMsgQueue(%u, %d)", (uint) hab, (int) cmsg);
     AnchorBlock *anchor = getAnchorBlock(hab);
     if (!anchor) {
         return NULLHANDLE;
@@ -570,13 +570,13 @@ HMQ WinCreateMsgQueue(HAB hab, LONG cmsg)
 
     const HMQ hmq = (HMQ) ihmq;
     anchor->message_queue.hmq = hmq;
-    TRACE_EVENT("HMQ %u created", (unsigned int) hmq);
+    TRACE_EVENT("HMQ %u created", (uint) hmq);
     return hmq;
 } // WinCreateMsgQueue
 
 static ERRORID postMessage(AnchorBlock *anchor, const QMSG *qmsg)
 {
-    TRACE_EVENT("EVENT POST { hwnd=%u, msg=%u (%s), mp1=%p, mp2=%p, time=%u, ptl={%d,%d}, reserved=%u }", (unsigned int) qmsg->hwnd, (unsigned int) qmsg->msg, messageName(qmsg->msg), qmsg->mp1, qmsg->mp2, (unsigned int) qmsg->time, (int) qmsg->ptl.x, (int) qmsg->ptl.y, (unsigned int) qmsg->reserved);
+    TRACE_EVENT("EVENT POST { hwnd=%u, msg=%u (%s), mp1=%p, mp2=%p, time=%u, ptl={%d,%d}, reserved=%u }", (uint) qmsg->hwnd, (uint) qmsg->msg, messageName(qmsg->msg), qmsg->mp1, qmsg->mp2, (uint) qmsg->time, (int) qmsg->ptl.x, (int) qmsg->ptl.y, (uint) qmsg->reserved);
 
     MessageQueueItem *item = anchor->message_queue.free_pool;
     if (item) {
@@ -779,14 +779,14 @@ sdfsdf
 
     const ULONG ticks = (ULONG) sdlevent->common.timestamp;
 
-    TRACE_EVENT("EVENT SDL { type=0x%X (%s) }", (unsigned int) sdlevent->type, sdlEventName(sdlevent->type));
+    TRACE_EVENT("EVENT SDL { type=0x%X (%s) }", (uint) sdlevent->type, sdlEventName(sdlevent->type));
 
     switch (sdlevent->type) {
         case SDL_QUIT:
             return postTimestampedMsg(anchor, NULLHANDLE, WM_QUIT, 0, 0, ticks);
 
         case SDL_WINDOWEVENT:
-            TRACE_EVENT("EVENT SDL WINDOW { type=0x%X (%s) }", (unsigned int) sdlevent->window.event, sdlWindowEventName(sdlevent->window.event));
+            TRACE_EVENT("EVENT SDL WINDOW { type=0x%X (%s) }", (uint) sdlevent->window.event, sdlWindowEventName(sdlevent->window.event));
             switch (sdlevent->window.event) {
                 case SDL_WINDOWEVENT_SHOWN:
                 case SDL_WINDOWEVENT_EXPOSED: {
@@ -896,7 +896,7 @@ static BOOL skipMessage(const PQMSG qmsg, HWND hwndFilter, ULONG msgFilterFirst,
 
 BOOL WinGetMsg(HAB hab, PQMSG pqmsg, HWND hwndFilter, ULONG msgFilterFirst, ULONG msgFilterLast)
 {
-    TRACE_NATIVE("WinGetMsg(%u, %p, %u, %u, %u)", (unsigned int) hab, pqmsg, (unsigned int) hwndFilter, (unsigned int) msgFilterFirst, (unsigned int) msgFilterLast);
+    TRACE_NATIVE("WinGetMsg(%u, %p, %u, %u, %u)", (uint) hab, pqmsg, (uint) hwndFilter, (uint) msgFilterFirst, (uint) msgFilterLast);
     const BOOL bIsFiltering = (hwndFilter || msgFilterFirst || msgFilterLast);
     AnchorBlock *anchor = getAnchorBlock(hab);
     if (!anchor) {
@@ -920,7 +920,7 @@ BOOL WinGetMsg(HAB hab, PQMSG pqmsg, HWND hwndFilter, ULONG msgFilterFirst, ULON
         if (i != NULL) {
             memcpy(pqmsg, &i->qmsg, sizeof (QMSG));
 
-            TRACE_EVENT("EVENT GET { hwnd=%u, msg=%u (%s), mp1=%p, mp2=%p, time=%u, ptl={%d,%d}, reserved=%u }", (unsigned int) pqmsg->hwnd, (unsigned int) pqmsg->msg, messageName(pqmsg->msg), pqmsg->mp1, pqmsg->mp2, (unsigned int) pqmsg->time, (int) pqmsg->ptl.x, (int) pqmsg->ptl.y, (unsigned int) pqmsg->reserved);
+            TRACE_EVENT("EVENT GET { hwnd=%u, msg=%u (%s), mp1=%p, mp2=%p, time=%u, ptl={%d,%d}, reserved=%u }", (uint) pqmsg->hwnd, (uint) pqmsg->msg, messageName(pqmsg->msg), pqmsg->mp1, pqmsg->mp2, (uint) pqmsg->time, (int) pqmsg->ptl.x, (int) pqmsg->ptl.y, (uint) pqmsg->reserved);
 
             if (prev) {
                 prev->next = i->next;
@@ -948,7 +948,7 @@ BOOL WinGetMsg(HAB hab, PQMSG pqmsg, HWND hwndFilter, ULONG msgFilterFirst, ULON
 
 MRESULT WinDispatchMsg(HAB hab, PQMSG pqmsg)
 {
-    TRACE_NATIVE("WinDispatchMsg(%u, %p)", (unsigned int) hab, pqmsg);
+    TRACE_NATIVE("WinDispatchMsg(%u, %p)", (uint) hab, pqmsg);
     AnchorBlock *anchor = getAnchorBlock(hab);
     if (anchor) {
         Window *win = getWindowFromHWND(anchor, pqmsg->hwnd);
@@ -961,7 +961,7 @@ MRESULT WinDispatchMsg(HAB hab, PQMSG pqmsg)
 
 BOOL WinDestroyMsgQueue(HMQ hmq)
 {
-    TRACE_NATIVE("WinDestroyMsgQueue(%u)", (unsigned int) hmq);
+    TRACE_NATIVE("WinDestroyMsgQueue(%u)", (uint) hmq);
     AnchorBlock *anchor = getAnchorBlockNoHAB();
     if (!anchor) {
         return FALSE;
@@ -974,7 +974,7 @@ BOOL WinDestroyMsgQueue(HMQ hmq)
 
 BOOL WinRegisterClass(HAB hab, PSZ pszClassName, PFNWP pfnWndProc, ULONG flStyle, ULONG cbWindowData)
 {
-    TRACE_NATIVE("WinRegisterClass(%u, '%s', %p, %u, %u)", (unsigned int) hab, pszClassName, pfnWndProc, (unsigned int) flStyle, (unsigned int) cbWindowData);
+    TRACE_NATIVE("WinRegisterClass(%u, '%s', %p, %u, %u)", (uint) hab, pszClassName, pfnWndProc, (uint) flStyle, (uint) cbWindowData);
 
     AnchorBlock *anchor = getAnchorBlock(hab);
     if (!anchor) {
@@ -1007,7 +1007,7 @@ MRESULT WinSendMsg(HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2)
     // !!! FIXME:  threads (and processes!), so this will need some effort to
     // !!! FIXME:  support.
 
-    TRACE_NATIVE("WinSendMsg(%u, %u, %p, %p)", (unsigned int) hwnd, (unsigned int) msg, mp1, mp2);
+    TRACE_NATIVE("WinSendMsg(%u, %u, %p, %p)", (uint) hwnd, (uint) msg, mp1, mp2);
     AnchorBlock *anchor = getAnchorBlockNoHAB();
     if (anchor) {
         Window *win = getWindowFromHWND(anchor, hwnd);
@@ -1030,7 +1030,7 @@ BOOL WinPostMsg(HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2)
     // !!! FIXME:  threads (and processes!), so this will need some effort to
     // !!! FIXME:  support.
 
-    TRACE_NATIVE("WinPostMsg(%u, %u, %p, %p)", (unsigned int) hwnd, (unsigned int) msg, mp1, mp2);
+    TRACE_NATIVE("WinPostMsg(%u, %u, %p, %p)", (uint) hwnd, (uint) msg, mp1, mp2);
     AnchorBlock *anchor = getAnchorBlockNoHAB();
     if (!anchor) {
         return FALSE;
@@ -1057,7 +1057,7 @@ BOOL WinPostMsg(HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2)
 
 BOOL WinPostQueueMsg(HMQ hmq, ULONG msg, MPARAM mp1, MPARAM mp2)
 {
-    TRACE_NATIVE("WinPostMsgQueue(%u, %u, %p, %p)", (unsigned int) hmq, (unsigned int) msg, mp1, mp2);
+    TRACE_NATIVE("WinPostMsgQueue(%u, %u, %p, %p)", (uint) hmq, (uint) msg, mp1, mp2);
     // I assume this works like win32's PostThreadMessage(), in that there
     //  isn't a target HWND, so the target thread would have to deal with this
     //  message after a call to WinGetMsg() and not in a window procedure
@@ -1071,7 +1071,7 @@ BOOL WinPostQueueMsg(HMQ hmq, ULONG msg, MPARAM mp1, MPARAM mp2)
 
 HWND WinCreateWindow(HWND hwndParent, PSZ pszClass, PSZ pszName, ULONG flStyle, LONG x, LONG y, LONG cx, LONG cy, HWND hwndOwner, HWND hwndInsertBehind, ULONG id, PVOID pCtlData, PVOID pPresParams)
 {
-    TRACE_NATIVE("WinCreateWindow(%u, '%s', '%s', %u, %d, %d, %d, %d, %u, %u, %u, %p, %p)", (unsigned int) hwndParent, pszClass, pszName, (unsigned int) flStyle, (int) x, (int) y, (int) cx, (int) cy, (unsigned int) hwndOwner, hwndInsertBehind, (unsigned int) id, pCtlData, pPresParams);
+    TRACE_NATIVE("WinCreateWindow(%u, '%s', '%s', %u, %d, %d, %d, %d, %u, %u, %u, %p, %p)", (uint) hwndParent, pszClass, pszName, (uint) flStyle, (int) x, (int) y, (int) cx, (int) cy, (uint) hwndOwner, hwndInsertBehind, (uint) id, pCtlData, pPresParams);
 
     AnchorBlock *anchor = getAnchorBlockNoHAB();
     if (!anchor) {
@@ -1266,7 +1266,7 @@ HWND WinCreateWindow(HWND hwndParent, PSZ pszClass, PSZ pszName, ULONG flStyle, 
 
 HWND WinCreateStdWindow(HWND hwndParent, ULONG flStyle, PULONG pflCreateFlags, PSZ pszClientClass, PSZ pszTitle, ULONG styleClient, HMODULE hmod, ULONG idResources, PHWND phwndClient)
 {
-    TRACE_NATIVE("WinCreateStdWindow(%u, %u, %p, '%s', '%s', %u, %u, %u, %p)", (unsigned int) hwndParent, (unsigned int) flStyle, pflCreateFlags, pszClientClass, pszTitle, (unsigned int) styleClient, (unsigned int) hmod, (unsigned int) idResources, phwndClient);
+    TRACE_NATIVE("WinCreateStdWindow(%u, %u, %p, '%s', '%s', %u, %u, %u, %p)", (uint) hwndParent, (uint) flStyle, pflCreateFlags, pszClientClass, pszTitle, (uint) styleClient, (uint) hmod, (uint) idResources, phwndClient);
 
     if (phwndClient) {
         *phwndClient = NULLHANDLE;
@@ -1294,7 +1294,7 @@ HWND WinCreateStdWindow(HWND hwndParent, ULONG flStyle, PULONG pflCreateFlags, P
 
 BOOL WinDestroyWindow(HWND hwnd)
 {
-    TRACE_NATIVE("WinDestroyWindow(%u)", (unsigned int) hwnd);
+    TRACE_NATIVE("WinDestroyWindow(%u)", (uint) hwnd);
     AnchorBlock *anchor = getAnchorBlockNoHAB();
     if (!anchor) {
         return FALSE;
@@ -1312,7 +1312,7 @@ BOOL WinDestroyWindow(HWND hwnd)
 
 MRESULT WinDefWindowProc(HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2)
 {
-    TRACE_NATIVE("WinDefWindowProc(%u, %u, %p, %p)", (unsigned int) hwnd, (unsigned int) msg, mp1, mp2);
+    TRACE_NATIVE("WinDefWindowProc(%u, %u, %p, %p)", (uint) hwnd, (uint) msg, mp1, mp2);
 
     AnchorBlock *anchor = getAnchorBlockNoHAB();
     if (!anchor) {
@@ -1444,11 +1444,11 @@ MRESULT WinDefWindowProc(HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2)
         case WM_QUERYWINDOWPARAMS:
         case WM_REALIZEPALETTE:
         case WM_WINDOWPOSCHANGED:
-            fprintf(stderr, "Message that doesn't something other than return 0, %u, in WinDefWindowProc!\n", (unsigned int) msg);
+            fprintf(stderr, "Message that doesn't something other than return 0, %u, in WinDefWindowProc!\n", (uint) msg);
             break;
 
         default:
-            fprintf(stderr, "Unhandled message %u in WinDefWindowProc!\n", (unsigned int) msg);
+            fprintf(stderr, "Unhandled message %u in WinDefWindowProc!\n", (uint) msg);
             break;
     }
 
@@ -1457,7 +1457,7 @@ MRESULT WinDefWindowProc(HWND hwnd, ULONG msg, MPARAM mp1, MPARAM mp2)
 
 HPS WinBeginPaint(HWND hwnd, HPS hps, PRECTL prclPaint)
 {
-    TRACE_NATIVE("WinBeginPaint(%u, %u, %p)", (unsigned int) hwnd, (unsigned int) hps, prclPaint);
+    TRACE_NATIVE("WinBeginPaint(%u, %u, %p)", (uint) hwnd, (uint) hps, prclPaint);
     AnchorBlock *anchor = getAnchorBlockNoHAB();
     if (!anchor) {
         return NULLHANDLE;
@@ -1515,7 +1515,7 @@ HPS WinBeginPaint(HWND hwnd, HPS hps, PRECTL prclPaint)
 
 BOOL WinEndPaint(HPS hps)
 {
-    TRACE_NATIVE("WinEndPaint(%u)", (unsigned int) hps);
+    TRACE_NATIVE("WinEndPaint(%u)", (uint) hps);
     AnchorBlock *anchor = getAnchorBlockNoHAB();
     if (!anchor) {
         return NULLHANDLE;
@@ -1591,7 +1591,7 @@ static void calcHeavyweightRect(const Window *win, SDL_Rect* rect)
 
 BOOL WinFillRect(HPS hps, PRECTL prcl, LONG lColor)
 {
-    TRACE_NATIVE("WinFillRect(%u, %p, %d)", (unsigned int) hps, prcl, (int) lColor);
+    TRACE_NATIVE("WinFillRect(%u, %p, %d)", (uint) hps, prcl, (int) lColor);
     AnchorBlock *anchor = getAnchorBlockNoHAB();
     if (!anchor) {
         return NULLHANDLE;
@@ -1616,7 +1616,7 @@ BOOL WinFillRect(HPS hps, PRECTL prcl, LONG lColor)
     Uint8 r, g, b;
     os2ColorIndexToRGB(lColor, &r, &g, &b);
 
-    //printf("fill { x=%d, y=%d, w=%d, h=%d, r=0x%X, g=0x%X, b=0x%X }\n", (int) rect.x, (int) rect.y, (int) rect.w, (int) rect.h, (unsigned int) r, (unsigned int) g, (unsigned int) b);
+    //printf("fill { x=%d, y=%d, w=%d, h=%d, r=0x%X, g=0x%X, b=0x%X }\n", (int) rect.x, (int) rect.y, (int) rect.w, (int) rect.h, (uint) r, (uint) g, (uint) b);
     SDL_RenderSetClipRect(renderer, &cliprect);
     SDL_SetRenderDrawColor(renderer, r, g, b, 0xFF);
     SDL_RenderFillRect(renderer, &rect);
