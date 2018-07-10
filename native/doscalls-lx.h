@@ -385,6 +385,7 @@ LX_NATIVE_MODULE_INIT({ if (!init16_doscalls()) return 0; })
     LX_NATIVE_EXPORT(DosDevConfig, 231),
     LX_NATIVE_EXPORT(DosExit, 234),
     LX_NATIVE_EXPORT(DosResetBuffer, 254),
+    LX_NATIVE_EXPORT(DosSetCurrentDir, 255),
     LX_NATIVE_EXPORT(DosSetFilePtr, 256),
     LX_NATIVE_EXPORT(DosClose, 257),
     LX_NATIVE_EXPORT(DosDelete, 259),

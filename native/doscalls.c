@@ -1965,45 +1965,6 @@ APIRET DosDelete(PSZ pszFile)
     return DosDelete_implementation(pszFile);
 } // DosDelete
 
-
-APIRET DosQueryCurrentDir(ULONG disknum, PBYTE pBuf, PULONG pcbBuf)
-{
-    TRACE_NATIVE("DosQueryCurrentDir(%u, %p, %p)", (uint) disknum, pBuf, pcbBuf);
-
-    if ((disknum != 0) && (disknum != 3))  // C:  (or "current")
-        return ERROR_INVALID_DRIVE;
-
-    // !!! FIXME: this is lazy.
-    char *cwd = getcwd(NULL, 0);
-    if (!cwd)
-        return ERROR_NOT_ENOUGH_MEMORY;  // this doesn't ever return this error on OS/2.
-
-    const size_t len = strlen(cwd);
-    if ((len + 1) > *pcbBuf) {
-        *pcbBuf = len + 1;
-        free(cwd);
-        return ERROR_BUFFER_OVERFLOW;
-    } // if
-
-    char *ptr = (char *) pBuf;
-
-    char *src = cwd;
-    while (*src == '/')
-        src++;  // skip initial '/' char.
-
-    while (*src) {
-        const char ch = *src;
-        *(ptr++) = ((ch == '/') ? '\\' : ch);
-        src++;
-    } // while
-
-    *ptr = '\0';
-
-    free(cwd);
-
-    return NO_ERROR;
-} // DosQueryCurrentDir
-
 APIRET DosSetPathInfo(PSZ pszPathName, ULONG ulInfoLevel, PVOID pInfoBuf, ULONG cbInfoBuf, ULONG flOptions)
 {
     TRACE_NATIVE("DosSetPathInfo('%s', %u, %p, %u, %u)", pszPathName, (uint) ulInfoLevel, pInfoBuf, (uint) cbInfoBuf, (uint) flOptions);
@@ -2418,18 +2379,6 @@ APIRET DosFindClose(HDIR hDir)
     return NO_ERROR;
 } // DosFindClose
 
-APIRET DosQueryCurrentDisk(PULONG pdisknum, PULONG plogical)
-{
-    TRACE_NATIVE("DosQueryCurrentDisk(%p, %p)", pdisknum, plogical);
-
-    // we only offer a "C:" drive at the moment.
-    if (pdisknum)
-        *pdisknum = 3;  // C:
-    if (plogical)
-        *plogical = (1 << 2);  // just C:
-    return NO_ERROR;
-} // DosQueryCurrentDisk
-
 APIRET DosDevConfig(PVOID pdevinfo, ULONG item)
 {
     TRACE_NATIVE("DosDevConfig(%p, %u)", pdevinfo, (uint) item);
@@ -2809,6 +2758,194 @@ APIRET DosQueryThreadContext(TID tid, ULONG level, PCONTEXTRECORD pcxt)
     return ERROR_INVALID_PARAMETER;
 } // DosQueryThreadContext
 
+static APIRET DosQueryCurrentDir_implementation(ULONG disknum, PBYTE pBuf, PULONG pcbBuf)
+{
+    if (disknum > (sizeof (GLoaderState.disks) / sizeof (GLoaderState.disks[0]))) {
+        return ERROR_INVALID_DRIVE;
+    }
+
+    const char *cdir = GLoaderState.current_dir[disknum ? (disknum-1) : GLoaderState.current_disk];
+    if (cdir == NULL) {
+        FIXME("should this return ERROR_INVALID_DRIVE?");
+        return ERROR_NOT_DOS_DISK;
+    }
+
+    const ULONG pathlen = (ULONG) strlen(cdir);
+    if (*pcbBuf <= pathlen) {
+        *pcbBuf = pathlen;
+        return ERROR_BUFFER_OVERFLOW;
+    }
+
+    strcpy((char *) pBuf, cdir);
+    *pcbBuf = pathlen;
+    return NO_ERROR;
+} // DosQueryCurrentDir_implementation
+
+APIRET DosQueryCurrentDir(ULONG disknum, PBYTE pBuf, PULONG pcbBuf)
+{
+    TRACE_NATIVE("DosQueryCurrentDir(%u, %p, %p)", (uint) disknum, pBuf, pcbBuf);
+    return DosQueryCurrentDir_implementation(disknum, pBuf, pcbBuf);
+} // DosQueryCurrentDir
+
+static APIRET DosQueryCurrentDisk_implementation(PULONG pdisknum, PULONG pdiskmap)
+{
+    *pdisknum = GLoaderState.current_disk;
+    *pdiskmap = GLoaderState.diskmap;
+    return NO_ERROR;
+} // DosQueryCurrentDisk_implementation
+
+APIRET DosQueryCurrentDisk(PULONG pdisknum, PULONG pdiskmap)
+{
+    TRACE_NATIVE("DosQueryCurrentDisk(%p, %p)", pdisknum, pdiskmap);
+    return DosQueryCurrentDisk_implementation(pdisknum, pdiskmap);
+} // DosQueryCurrentDisk
+
+static APIRET DosSetCurrentDir_implementation(PSZ pszName)
+{
+    // OS/2 reports failure for changing to a path that ends in '\\' even if
+    //  the rest of the path is a valid dir. Linux does not, so we explicitly
+    //  check it here. However, "\\" by itself is valid (as the absolute path
+    //  to the disk's root dir).
+
+    if (*pszName == '\0') {
+        return NO_ERROR;  // I guess this is a no-op...?
+    } else if ((pszName[0] == '\\') && (pszName[1] == '\0')) {
+        // this is okay.
+    } else if (pszName[strlen(pszName) - 1] == '\\') {
+        return ERROR_PATH_NOT_FOUND;
+    }
+
+    FIXME("This function needs a lock");  // in case the cwd changes from another thread.
+
+    uint32 err = 0;
+    char *path = makeUnixPath(pszName, &err);
+    if (!path) return (APIRET) err;
+
+    // generally we don't use the Unix process's cwd, but this might be
+    //  helpful for subprocesses or native builds, but mostly, it checks
+    //  all the stuff we care about (missing dir, not a dir, etc).
+    APIRET retval = NO_ERROR;
+    if (chdir(path) == -1) {
+        switch (errno) {
+            // OS/2 treats a chdir to a regular file as "Path not found", even though it _is_ found.  :/
+            case ENOTDIR: retval = ERROR_PATH_NOT_FOUND; break;
+            case ENOENT: retval = ERROR_PATH_NOT_FOUND; break;
+            case EACCES: retval = ERROR_ACCESS_DENIED; break;
+            case EIO: retval = ERROR_DRIVE_LOCKED; break;
+            case ENAMETOOLONG: retval = ERROR_FILENAME_EXCED_RANGE; break;
+            case ENOMEM: retval = ERROR_NOT_ENOUGH_MEMORY; break;
+            default: retval = ERROR_PATH_NOT_FOUND; break;
+        }
+    }
+
+    free(path);
+
+    if (retval == NO_ERROR) {
+        char drive = pszName[0];
+        if ((drive >= 'a') && (drive <= 'z')) {
+            drive += 'A' - 'a';
+        }
+
+        if (((drive >= 'A') && (drive <= 'Z')) && (pszName[1] == ':')) {  // it's a drive letter.
+            pszName += 2;  // skip drive letter and colon.
+        } else {
+            drive = (GLoaderState.current_disk-1) + 'A';
+        }
+
+        const int driveidx = drive - 'A';
+        char *oldpath = (*pszName == '\\') ? "" : GLoaderState.current_dir[driveidx];
+        const size_t buflen = strlen(pszName) + strlen(oldpath) + 2;
+        char *newpath = (char *)  malloc(buflen);
+        if (!newpath) {
+            return ERROR_NOT_ENOUGH_MEMORY;
+        }
+
+        // set up the string we'll use for the cwd. Normalize out "." and ".." chars, append to existing path
+        //  if we're relative, etc.
+        snprintf(newpath, buflen, "%s%s%s", oldpath, *oldpath ? "\\" : "", pszName);
+
+        char *ptr = newpath;
+
+        // strip out double '\\' chars.
+        while ( (ptr = strstr(ptr, "\\\\")) != NULL ) {
+            memmove(ptr, ptr + 1, strlen(ptr));
+        }
+
+        // trim '\\' char off the start of the string if it exists.
+        if (*newpath == '\\') {
+            memmove(newpath, newpath + 1, strlen(newpath));
+        }
+
+        // strip out "." and ".." dirs.
+        char *element = newpath;
+        ptr = newpath;
+        while ( (ptr = strchr(ptr, '\\')) != NULL ) {
+            *ptr = '\0';
+            if (strcmp(element, ".") == 0) {  // dump "." subdir.
+                memmove(element, ptr + 1, strlen(ptr + 1) + 1);
+                ptr = element;
+            } else if (strcmp(element, "..") == 0) {  // dump ".." subdir and parent.
+                if (element == newpath) {  // no parent? Just dump "..".
+                    memmove(newpath, ptr + 1, strlen(ptr + 1) + 1);
+                    ptr = newpath;
+                } else {
+                    assert(((int)(element - newpath)) >= 2);  // shouldn't be "\\" at start of string.
+                    char *prev = element - 2;
+                    while ((prev != newpath) && (*prev != '\\')) {
+                        prev--;
+                    }
+                    if (prev != newpath) {
+                        prev++;
+                    }
+                    memmove(prev, ptr + 1, strlen(ptr + 1) + 1);
+                    ptr = prev;
+                }
+            } else {
+                *ptr = '\\';  // just a normal dir, restore it.
+                ptr++;
+            }
+            element = ptr;
+        }
+
+        // check last element, when strchr fails because there wasn't any more '\\' chars...
+        if (strcmp(element, ".") == 0) {
+            if (element != newpath) {
+                element--;  // so we eat the '\\' char
+            }
+            *element = '\0';
+        } else if (strcmp(element, "..") == 0) {
+            if (element == newpath) {  // no parent? Just dump the whole string.
+                *newpath = '\0';
+            } else {
+                assert(((int)(element - newpath)) >= 2);  // shouldn't be "\\" at start of string.
+                char *prev = element - 2;
+                while ((prev != newpath) && (*prev != '\\')) {
+                    prev--;
+                }
+                *prev = '\0';  // dump parent (if any) and ".."
+            }
+        }
+
+        ptr = (char *) realloc(newpath, strlen(newpath) + 1);  // shrink if possible.
+        if (ptr) {
+            newpath = ptr;
+        }
+
+        //printf("CHDIR: Normalized '%s' + '%s' to '%s'\n", oldpath, pszName, newpath);
+        free(GLoaderState.current_dir[driveidx]);
+        GLoaderState.current_dir[driveidx] = newpath;
+    }
+
+    return retval;
+} // DosSetCurrentDir_implementation
+
+APIRET DosSetCurrentDir(PSZ pszName)
+{
+    TRACE_NATIVE("DosSetCurrentDir('%s')", pszName);
+    return DosSetCurrentDir_implementation(pszName);
+} // DosSetCurrentDir
+
+
 #if !LX_LEGACY
 ULONG DosSelToFlat(VOID) { return 0; }
 #else
@@ -3180,33 +3317,20 @@ APIRET16 Dos16GetInfoSeg(PSEL globalseg, PSEL localseg)
 APIRET16 Dos16QCurDisk(PUSHORT drivenum, PULONG drivemap)
 {
     TRACE_NATIVE("Dos16QCurDisk(%p, %p)", drivenum, drivemap);
-    if (drivenum) *drivenum = 3; // FIXME: C: only
-    if (drivemap) *drivemap = 1 << 2;
-    return NO_ERROR;
-}
+    ULONG uldrivenum;
+    const APIRET rc = DosQueryCurrentDisk_implementation(&uldrivenum, drivemap);
+    *drivenum = (USHORT) uldrivenum;
+    return (APIRET16) rc;
+} // Dos16QCurDisk
 
 APIRET16 Dos16QCurDir(USHORT drivenum, PBYTE dirpath, PUSHORT dirpathlen)
 {
-    TRACE_NATIVE("Dos16QCurDir(%d, %p, %p)", drivenum, dirpath, dirpathlen);
-    if (!dirpathlen || !dirpath) return ERROR_INVALID_PARAMETER; // ???
-    int rlen, len = *dirpathlen;
-    char dirtmp[PATH_MAX];
-    getcwd(dirtmp, PATH_MAX);
-    rlen = strlen(dirtmp);
-    if (dirpathlen) *dirpathlen = rlen + 1;
-    if (rlen >= len) {
-        *dirpathlen = rlen + 1;
-        return ERROR_BUFFER_OVERFLOW;
-    }
-    char *pch = strchr(dirtmp, '/');
-    while (pch) {
-        *pch = '\\';
-        pch = strchr(pch, '/');
-    }
- 
-    strcpy((char *)dirpath, dirtmp + 1);
-    return NO_ERROR;
-}
+    TRACE_NATIVE("Dos16QCurDir(%u, %p, %p)", (uint) drivenum, dirpath, dirpathlen);
+    ULONG uldirpathlen = (ULONG) *dirpathlen;
+    const APIRET rc = DosQueryCurrentDir_implementation(drivenum, dirpath, &uldirpathlen);
+    *dirpathlen = (USHORT) uldirpathlen;
+    return (APIRET16) rc;
+} // Dos16QCurDir
 
 APIRET16 Dos16HoldSignal(USHORT action)
 {
@@ -3280,15 +3404,11 @@ APIRET16 Dos16FindFirst(PSZ pszFileSpec, PSHORT phdir, USHORT flAttribute, PVOID
 APIRET16 Dos16ChDir(PSZ pszDir, ULONG res)
 {
     TRACE_NATIVE("Dos16ChDir('%s', %u)", pszDir, res);
-    APIRET err;
-    char *path = makeUnixPath(pszDir, &err);
-    if (!path) return err;
-    int ret = chdir(path);
-    free(path);
-    if (ret && (errno == ENOENT)) return ERROR_PATH_NOT_FOUND;
-    else if (ret) return ERROR_ACCESS_DENIED;
-    return NO_ERROR;
-}
+    if (res != 0) {  // reserved, and must be zero, or return error.
+        return ERROR_INVALID_PARAMETER;
+    }
+    return (APIRET16) DosSetCurrentDir_implementation(pszDir);
+} // Dos16ChDir
 
 APIRET16 Dos16Close(USHORT hFile)
 {
