@@ -685,8 +685,6 @@ LX_NATIVE_CONSTRUCTOR(lib2ine)
     GLoaderState.subprocess = (getenv("IS_2INE") != NULL);
 
     initPib();
-
-    GLoaderState.running = 1;
 }
 
 LX_NATIVE_DESTRUCTOR(lib2ine)
