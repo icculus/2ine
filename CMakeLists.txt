@@ -92,7 +92,7 @@ endforeach()
 
 target_link_libraries(doscalls "pthread")
 # FIXME target_link_libraries(viocalls ${CURSES_LIBRARIES})
-target_link_libraries(viocalls ncursesw)
+target_link_libraries(viocalls /usr/lib/i386-linux-gnu/libncursesw.so.5)
 
 # !!! FIXME: clean this up/
 if(LX_LEGACY)
