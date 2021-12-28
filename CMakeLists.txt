@@ -51,6 +51,7 @@ endif()
 add_definitions(-std=c99 -Wall -ggdb3)
 add_definitions(-D_FILE_OFFSET_BITS=64)
 
+
 set(CURSES_NEED_WIDE TRUE)
 set(CURSES_NEED_NCURSES TRUE)
 find_package(Curses)
@@ -59,20 +60,9 @@ if(NOT CURSES_FOUND)
 endif()
 
 include_directories(${CURSES_INCLUDE_DIR})
-if(CURSES_HAVE_NCURSESW_NCURSES_H)
-    add_definitions(-DHAVE_NCURSESW_NCURSES_H)
-elseif(CURSES_HAVE_NCURSESW_CURSES_H)
-    add_definitions(-DHAVE_NCURSESW_CURSES_H)
-elseif(CURSES_HAVE_NCURSESW_H)
-    add_definitions(-DHAVE_NCURSESW_H)
-elseif(CURSES_HAVE_CURSES_H)
-    add_definitions(-DHAVE_CURSES_H)
-elseif(CURSES_HAVE_NCURSES_CURSES_H)
-    add_definitions(-DHAVE_NCURSESW_NCURSES_H)
-endif()
 
-# !!! FIXME
-include_directories("/usr/local/include/SDL2")
+find_package(SDL2 REQUIRED)
+include_directories(${SDL2_INCLUDE_DIRS})
 
 add_library(2ine SHARED "lib2ine.c")
 if(LX_LEGACY)
@@ -91,17 +81,10 @@ foreach(_I doscalls;msg;nls;quecalls;viocalls;kbdcalls;sesmgr;som;pmwin;pmshapi;
 endforeach()
 
 target_link_libraries(doscalls "pthread")
-# FIXME target_link_libraries(viocalls ${CURSES_LIBRARIES})
-target_link_libraries(viocalls /usr/lib/i386-linux-gnu/libncursesw.so.5)
+target_link_libraries(viocalls libncursesw.so)
 
-# !!! FIXME: clean this up/
-if(LX_LEGACY)
-    target_link_libraries(2ine "${CMAKE_CURRENT_SOURCE_DIR}/libSDL2-2.0.so.0")
-    target_link_libraries(pmwin "${CMAKE_CURRENT_SOURCE_DIR}/libSDL2-2.0.so.0")
-else()
-    target_link_libraries(2ine "SDL2")
-    target_link_libraries(pmwin "SDL2")
-endif()
+target_link_libraries(2ine "SDL2")
+target_link_libraries(pmwin "SDL2")
 
 add_executable(lx_dump lx_dump.c)
 
