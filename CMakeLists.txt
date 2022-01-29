@@ -92,7 +92,7 @@ endforeach()
 
 target_link_libraries(doscalls "pthread")
 # FIXME target_link_libraries(viocalls ${CURSES_LIBRARIES})
-target_link_libraries(viocalls /usr/lib/i386-linux-gnu/libncursesw.so.5)
+target_link_libraries(viocalls /usr/lib/i386-linux-gnu/libncursesw.so.6)
 
 # !!! FIXME: clean this up/
 if(LX_LEGACY)
@@ -109,8 +109,8 @@ if(LX_LEGACY)
     add_executable(lx_loader lx_loader.c)
     target_link_libraries(lx_loader 2ine)
     target_link_libraries(lx_loader "dl")
-    set_target_properties(lx_loader PROPERTIES COMPILE_FLAGS "-m32")
-    set_target_properties(lx_loader PROPERTIES LINK_FLAGS "-m32 -ggdb3")
+    set_target_properties(lx_loader PROPERTIES COMPILE_FLAGS "-m32 -no-pie")
+    set_target_properties(lx_loader PROPERTIES LINK_FLAGS "-m32 -no-pie -ggdb3")
 endif()
 
 # end of CMakeLists.txt ...
