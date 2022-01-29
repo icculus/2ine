@@ -2947,6 +2947,47 @@ APIRET DosSetCurrentDir(PSZ pszName)
 } // DosSetCurrentDir
 
 
+static APIRET DosCreateDir_implementation(PSZ pszDirName, PEAOP2 peaop2)
+{
+    if (peaop2 != NULL) {
+        FIXME("EAs not yet implemented");
+        return ERROR_EA_LIST_INCONSISTENT;
+    }
+
+    uint32 err = 0;
+    char *path = makeUnixPath(pszDirName, &err);
+    if (!path) return (APIRET) err;
+
+    const int rc = mkdir(path, 0755);
+    free(path);
+    if (rc == -1) {
+        switch (errno) {
+            case EACCES: return ERROR_ACCESS_DENIED;
+            case EBUSY: return ERROR_ACCESS_DENIED;
+            case EISDIR: return ERROR_ACCESS_DENIED;
+            case ENAMETOOLONG: return ERROR_FILENAME_EXCED_RANGE;
+            case ENOENT: return ERROR_FILE_NOT_FOUND;  // !!! FIXME: could be PATH_NOT_FOUND too, depending on circumstances.
+            case ENOTDIR: return ERROR_PATH_NOT_FOUND;
+            case EPERM: return ERROR_ACCESS_DENIED;
+            case EROFS: return ERROR_ACCESS_DENIED;
+            case ETXTBSY: return ERROR_ACCESS_DENIED;
+            default: return ERROR_INVALID_PARAMETER;  // !!! FIXME: debug logging about missin errno case.
+        }
+        __builtin_unreachable();
+    }
+
+    return NO_ERROR;
+} // DosCreateDir_implementation
+
+
+APIRET DosCreateDir(PSZ pszDirName, PEAOP2 peaop2)
+{
+    TRACE_NATIVE("DosCreateDir('%s', %p)", pszDirName, peaop2);
+    return DosCreateDir_implementation(pszDirName, peaop2);
+} // DosCreateDir
+
+
+
 #if !LX_LEGACY
 ULONG DosSelToFlat(VOID) { return 0; }
 #else
@@ -3618,6 +3659,19 @@ APIRET16 Dos16Beep(USHORT freq, USHORT duration)
     TRACE_NATIVE("Dos16Beep(%u, %u)", freq, duration);
     return DosBeep_implementation(freq, duration);
 } // Dos16Beep
+
+
+APIRET16 Dos16MkDir(PSZ pszDirName, PEAOP2 peaop2)
+{
+    TRACE_NATIVE("Dos16MkDir('%s', %p)", pszDirName, peaop2);
+    return DosCreateDir_implementation(pszDirName, peaop2);
+}
+
+APIRET16 Dos16MkDir2(PSZ pszDirName, PEAOP2 peaop2)  // !!! FIXME: check this.
+{
+    TRACE_NATIVE("Dos16MkDir('%s', %p)", pszDirName, peaop2);
+    return DosCreateDir_implementation(pszDirName, peaop2);
+}
 
 
 LX_NATIVE_CONSTRUCTOR(doscalls)

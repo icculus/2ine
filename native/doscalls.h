@@ -545,6 +545,8 @@ OS2EXPORT APIRET16 OS2API16 Dos16ExecPgm(PCHAR pObjname, SHORT cbObjname, USHORT
 OS2EXPORT APIRET16 OS2API16 Dos16CWait(USHORT action, USHORT option, PRESULTCODES16 pres, PUSHORT ppid, USHORT pid) OS2APIINFO(2);
 OS2EXPORT APIRET16 OS2API16 Dos16ChgFilePtr(USHORT handle, LONG distance, USHORT whence, PULONG newoffset) OS2APIINFO(58);
 OS2EXPORT APIRET16 OS2API16 Dos16Beep(USHORT freq, USHORT dur) OS2APIINFO(50);
+OS2EXPORT APIRET16 OS2API16 Dos16MkDir(PSZ pszDirName, PEAOP2 peaop2) OS2APIINFO(66);   // !!! FIXME: check this one
+OS2EXPORT APIRET16 OS2API16 Dos16MkDir2(PSZ pszDirName, PEAOP2 peaop2) OS2APIINFO(185);  // !!! FIXME: check this one
 
 // !!! FIXME: these should probably get sorted alphabetically and/or grouped
 // !!! FIXME:  into areas of functionality, but for now, I'm just listing them
@@ -621,6 +623,7 @@ OS2EXPORT APIRET OS2API DosQueryFSAttach(PSZ pszDeviceName, ULONG ulOrdinal, ULO
 OS2EXPORT APIRET OS2API DosSetFileSize(HFILE hFile, ULONG cbSize) OS2APIINFO(272);
 OS2EXPORT APIRET OS2API DosSetCurrentDir(PSZ pszName) OS2APIINFO(255);
 OS2EXPORT APIRET OS2API DosBeep(ULONG freq, ULONG dur) OS2APIINFO(286);
+OS2EXPORT APIRET OS2API DosCreateDir(PSZ pszDirName, PEAOP2 peaop2) OS2APIINFO(270);
 
 #ifdef __cplusplus
 }

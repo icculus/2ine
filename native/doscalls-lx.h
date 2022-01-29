@@ -133,6 +133,12 @@ static APIRET16 bridge16to32_Dos16FindNext(uint8 *args) {
     return Dos16FindNext(hDir, pfindbuf, cbfindbuf, pcFilenames);
 }
 
+static APIRET16 bridge16to32_Dos16MkDir(uint8 *args) {
+    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PEAOP2, peaop2);
+    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PSZ, pszDirName);
+    return Dos16MkDir(pszDirName, peaop2);
+}
+
 static APIRET16 bridge16to32_Dos16Open(uint8 *args) {
     LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PEAOP2, peaop2);
     LX_NATIVE_MODULE_16BIT_BRIDGE_ARG(USHORT, fsOpenMode);
@@ -259,6 +265,12 @@ static APIRET16 bridge16to32_Dos16ExecPgm(uint8 *args) {
     return Dos16ExecPgm(pObjname, cbObjname, execFlag, pArg, pEnv, pRes, pName);
 }
 
+static APIRET16 bridge16to32_Dos16MkDir2(uint8 *args) {
+    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PEAOP2, peaop2);
+    LX_NATIVE_MODULE_16BIT_BRIDGE_PTRARG(PSZ, pszDirName);
+    return Dos16MkDir2(pszDirName, peaop2);
+}
+
 LX_NATIVE_MODULE_16BIT_SUPPORT()
     LX_NATIVE_MODULE_16BIT_API(Dos16CWait)
     LX_NATIVE_MODULE_16BIT_API(Dos16Exit)
@@ -279,6 +291,7 @@ LX_NATIVE_MODULE_16BIT_SUPPORT()
     LX_NATIVE_MODULE_16BIT_API(Dos16FindClose)
     LX_NATIVE_MODULE_16BIT_API(Dos16FindFirst)
     LX_NATIVE_MODULE_16BIT_API(Dos16FindNext)
+    LX_NATIVE_MODULE_16BIT_API(Dos16MkDir)
     LX_NATIVE_MODULE_16BIT_API(Dos16Open)
     LX_NATIVE_MODULE_16BIT_API(Dos16QCurDir)
     LX_NATIVE_MODULE_16BIT_API(Dos16QCurDisk)
@@ -297,6 +310,7 @@ LX_NATIVE_MODULE_16BIT_SUPPORT()
     LX_NATIVE_MODULE_16BIT_API(DosSemWait)
     LX_NATIVE_MODULE_16BIT_API(DosSemSet)
     LX_NATIVE_MODULE_16BIT_API(Dos16ExecPgm)
+    LX_NATIVE_MODULE_16BIT_API(Dos16MkDir2)
 LX_NATIVE_MODULE_16BIT_SUPPORT_END()
 
 LX_NATIVE_MODULE_DEINIT({
@@ -324,6 +338,7 @@ static int init16_doscalls(void) {
         LX_NATIVE_INIT_16BIT_BRIDGE(Dos16FindClose, 2)
         LX_NATIVE_INIT_16BIT_BRIDGE(Dos16FindFirst, 24)
         LX_NATIVE_INIT_16BIT_BRIDGE(Dos16FindNext, 12)
+        LX_NATIVE_INIT_16BIT_BRIDGE(Dos16MkDir, 8)
         LX_NATIVE_INIT_16BIT_BRIDGE(Dos16Open, 26)
         LX_NATIVE_INIT_16BIT_BRIDGE(Dos16QCurDir, 10)
         LX_NATIVE_INIT_16BIT_BRIDGE(Dos16QCurDisk, 8)
@@ -342,6 +357,7 @@ static int init16_doscalls(void) {
         LX_NATIVE_INIT_16BIT_BRIDGE(DosSemWait, 8)
         LX_NATIVE_INIT_16BIT_BRIDGE(DosSemSet, 4)
         LX_NATIVE_INIT_16BIT_BRIDGE(Dos16ExecPgm, 24)
+        LX_NATIVE_INIT_16BIT_BRIDGE(Dos16MkDir2, 8)
     LX_NATIVE_MODULE_INIT_16BIT_SUPPORT_END()
     return 1;
 }
@@ -366,6 +382,7 @@ LX_NATIVE_MODULE_INIT({ if (!init16_doscalls()) return 0; })
     LX_NATIVE_EXPORT16(Dos16FindClose, 63),
     LX_NATIVE_EXPORT16(Dos16FindFirst, 64),
     LX_NATIVE_EXPORT16(Dos16FindNext, 65),
+    LX_NATIVE_EXPORT16(Dos16MkDir, 66),
     LX_NATIVE_EXPORT16(Dos16Open, 70),
     LX_NATIVE_EXPORT16(Dos16QCurDir, 71),
     LX_NATIVE_EXPORT16(Dos16QCurDisk, 72),
@@ -384,6 +401,7 @@ LX_NATIVE_MODULE_INIT({ if (!init16_doscalls()) return 0; })
     LX_NATIVE_EXPORT16(DosSemWait, 142),
     LX_NATIVE_EXPORT16(DosSemSet, 143),
     LX_NATIVE_EXPORT16(Dos16ExecPgm, 144),
+    LX_NATIVE_EXPORT16(Dos16MkDir2, 185),
     LX_NATIVE_EXPORT(DosSetMaxFH, 209),
     LX_NATIVE_EXPORT(DosSetPathInfo, 219),
     LX_NATIVE_EXPORT(DosQueryPathInfo, 223),
@@ -402,6 +420,7 @@ LX_NATIVE_MODULE_INIT({ if (!init16_doscalls()) return 0; })
     LX_NATIVE_EXPORT(DosFindClose, 263),
     LX_NATIVE_EXPORT(DosFindFirst, 264),
     LX_NATIVE_EXPORT(DosFindNext, 265),
+    LX_NATIVE_EXPORT(DosCreateDir, 270),
     LX_NATIVE_EXPORT(DosSetFileSize, 272),
     LX_NATIVE_EXPORT(DosOpen, 273),
     LX_NATIVE_EXPORT(DosQueryCurrentDir, 274),
