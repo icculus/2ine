@@ -1941,7 +1941,9 @@ static APIRET DosDelete_implementation(PSZ pszFile)
     if (!unixpath)
         return err;
 
-    if (unlink(unixpath) == -1) {
+    const int rc = unlink(unixpath);
+    free(unixpath);
+    if (rc == -1) {
         switch (errno) {
             case EACCES: return ERROR_ACCESS_DENIED;
             case EBUSY: return ERROR_ACCESS_DENIED;
