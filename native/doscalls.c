@@ -2710,6 +2710,7 @@ APIRET DosQueryExtLIBPATH(PSZ pszExtLIBPATH, ULONG flags)
 
 APIRET DosSetMaxFH(ULONG cFH)
 {
+    TRACE_NATIVE("DosSetMaxFH(%u)", (uint) cFH);
     grabLock(&GMutexDosCalls);
 
     if (cFH < MaxHFiles) {
