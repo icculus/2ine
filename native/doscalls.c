@@ -1149,14 +1149,21 @@ static APIRET queryPathInfoEaSize(PSZ unixPath, PVOID pInfoBuf, ULONG cbInfoBuf)
 static APIRET queryPathInfoFullName(PSZ unixPath, PVOID pInfoBuf, ULONG cbInfoBuf)
 {
     char *real = realpath(unixPath, NULL);
-    if (real == NULL)
-        return ERROR_NOT_ENOUGH_MEMORY;  // !!! FIXME: no
+    if (real == NULL) {
+        // !!! FIXME: what _should_ this do if file doesn't exist? If parent directory doesn't?
+        real = strdup(unixPath);  // could be file doesn't exist, but this still needs to return something...
+        if (real == NULL) {
+            return ERROR_NOT_ENOUGH_MEMORY;  // !!! FIXME: no
+        }
+    }
 
-    if ((strlen(real) + 3) < cbInfoBuf) {
+    if ((strlen(real) + 3) >= cbInfoBuf) {
         free(real);
         return ERROR_BUFFER_OVERFLOW;
-    } // if
+    }
 
+    // !!! FIXME: this needs to map to drive letters defined in a config
+    // !!! FIXME:  eventually.
     char *dst = (char *) pInfoBuf;
     *(dst++) = 'C';
     *(dst++) = ':';
@@ -1167,7 +1174,7 @@ static APIRET queryPathInfoFullName(PSZ unixPath, PVOID pInfoBuf, ULONG cbInfoBu
         if (*dst == '/')
             *dst = '\\';
         dst++;
-    } // while
+    }
 
     return NO_ERROR;
 } // queryPathInfoFullName
