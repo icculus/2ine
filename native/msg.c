@@ -70,5 +70,21 @@ APIRET16 Dos16TrueGetMessage(PVOID pTable, USHORT cTable, PCHAR pData, USHORT cb
     return NO_ERROR;
 }
 
+APIRET DosTrueGetMessage(PVOID msgseg, PVOID pTable, ULONG cTable, PCHAR pData, ULONG cbBuf, ULONG msgnum, PCHAR pFilename, PULONG pcbMsg)
+{
+    TRACE_NATIVE("DosTrueGetMessage(%p, %p, %u, %p, %u, %u, '%s', %p)", msgseg, pTable, cTable, pData, cbBuf, msgnum, pFilename, pcbMsg);
+    FIXME("really implement this");
+    const char *msgstr = "SYSXXX: DosTrueGetMessage is not yet implemented.";
+    ULONG rc = 0;
+    if (pData) {
+        rc = (ULONG) snprintf(pData, cbBuf, "%s", msgstr);
+        if (rc >= cbBuf) {
+            rc = cbBuf;
+        }
+    }
+    if (pcbMsg) *pcbMsg = rc;
+    return ERROR_MR_MID_NOT_FOUND;
+}
+
 // end of msg.c ...
 

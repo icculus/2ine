@@ -48,7 +48,8 @@ static int init16_msg(void) {
 LX_NATIVE_MODULE_INIT({ if (!init16_msg()) return 0; })
     LX_NATIVE_EXPORT16_DIFFERENT_NAME(Dos16PutMessage, "DOSPUTMESSAGE", 1),
     LX_NATIVE_EXPORT16_DIFFERENT_NAME(Dos16TrueGetMessage, "DOSTRUEGETMESSAGE", 2),
-    LX_NATIVE_EXPORT(DosPutMessage, 5)
+    LX_NATIVE_EXPORT(DosPutMessage, 5),
+    LX_NATIVE_EXPORT(DosTrueGetMessage, 6)
 LX_NATIVE_MODULE_INIT_END()
 
 #endif /* LX_LEGACY */
