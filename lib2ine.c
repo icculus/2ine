@@ -802,7 +802,6 @@ static void lib2ine_shutdown(void)
     free(GLoaderState.pib.pib_pchenv);
     GLoaderState.pib.pib_pchenv = NULL;
 
-    memset(&GLoaderState, '\0', sizeof (GLoaderState));
     pthread_key_delete(tlskey);
 }
 
