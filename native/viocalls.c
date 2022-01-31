@@ -210,9 +210,9 @@ APIRET16 VioGetMode(PVIOMODEINFO pvioModeInfo, HVIO hvio)
     else if (pvioModeInfo->cb != sizeof (*pvioModeInfo))
         return ERROR_VIO_INVALID_LENGTH;
 
-    FIXME("might need to init ncurses at some point, but not yet.");
-    //else if (!initNcurses())
-    //    return ERROR_VIO_INVALID_HANDLE;
+    //FIXME("might need to init ncurses at some point, but not yet.");
+    else if (!initNcurses())
+        return ERROR_VIO_INVALID_HANDLE;
 
     memset(pvioModeInfo, '\0', sizeof (*pvioModeInfo));
     pvioModeInfo->cb = sizeof (*pvioModeInfo);
