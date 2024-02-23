@@ -8,7 +8,7 @@
 
 #include "os2native.h"
 #include "pmwin.h"
-#include "SDL.h"
+#include <SDL.h>
 
 #include "pmwin-lx.h"
 

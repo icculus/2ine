@@ -28,6 +28,16 @@ project(2ine)
 #  trampolines. I'm probably getting ahead of myself, though, as it's not like
 #  any OS/2 apps were _that_ memory hungry, and honestly? Port your software.
 
+if (NOT CMAKE_C_FLAGS)
+    set(CMAKE_C_FLAGS -m32)
+endif()
+
+if (CMAKE_C_FLAGS MATCHES .*-m32.*)
+    set(CMAKE_LIBRARY_ARCHITECTURE i386-linux-gnu)
+else()
+    message(FATAL_ERROR "2ine only works in 32bits, please include -m32 in CFLAGS")
+endif()
+
 if(NOT CMAKE_BUILD_TYPE)
     set(DEBUG_BUILD ON)
 endif()
@@ -71,33 +81,35 @@ elseif(CURSES_HAVE_NCURSES_CURSES_H)
     add_definitions(-DHAVE_NCURSESW_NCURSES_H)
 endif()
 
-# !!! FIXME
-include_directories("/usr/local/include/SDL2")
+find_package(SDL2)
+if(NOT SDL2_FOUND)
+    message(FATAL_ERROR "sdl2 not found")
+endif()
+
+include_directories(${SDL2_INCLUDE_DIRS})
 
 add_library(2ine SHARED "lib2ine.c")
 if(LX_LEGACY)
-    set_target_properties(2ine PROPERTIES COMPILE_FLAGS "-m32")
-    set_target_properties(2ine PROPERTIES LINK_FLAGS "-m32 -ggdb3")
+    set_target_properties(2ine PROPERTIES LINK_FLAGS "-ggdb3")
 endif()
 target_link_libraries(2ine "pthread")
 
 foreach(_I doscalls;msg;nls;quecalls;viocalls;kbdcalls;sesmgr;som;pmwin;pmshapi;pmgpi;tcpip32)
     add_library(${_I} SHARED "native/${_I}.c")
     if(LX_LEGACY)
-        set_target_properties(${_I} PROPERTIES COMPILE_FLAGS "-m32")
-        set_target_properties(${_I} PROPERTIES LINK_FLAGS "-m32 -ggdb3")
+        #set_target_properties(${_I} PROPERTIES COMPILE_FLAGS "-m32")
+        set_target_properties(${_I} PROPERTIES LINK_FLAGS "-ggdb3")
     endif()
     target_link_libraries(${_I} 2ine)
 endforeach()
 
 target_link_libraries(doscalls "pthread")
-# FIXME target_link_libraries(viocalls ${CURSES_LIBRARIES})
-target_link_libraries(viocalls /usr/lib/i386-linux-gnu/libncursesw.so.6)
+target_link_libraries(viocalls ${CURSES_LIBRARIES})
 
 # !!! FIXME: clean this up/
 if(LX_LEGACY)
-    target_link_libraries(2ine "${CMAKE_CURRENT_SOURCE_DIR}/libSDL2-2.0.so.0")
-    target_link_libraries(pmwin "${CMAKE_CURRENT_SOURCE_DIR}/libSDL2-2.0.so.0")
+    target_link_libraries(2ine ${SDL2_LIBRARIES})
+    target_link_libraries(pmwin ${SDL2_LIBRARIES})
 else()
     target_link_libraries(2ine "SDL2")
     target_link_libraries(pmwin "SDL2")
@@ -109,8 +121,8 @@ if(LX_LEGACY)
     add_executable(lx_loader lx_loader.c)
     target_link_libraries(lx_loader 2ine)
     target_link_libraries(lx_loader "dl")
-    set_target_properties(lx_loader PROPERTIES COMPILE_FLAGS "-m32 -no-pie")
-    set_target_properties(lx_loader PROPERTIES LINK_FLAGS "-m32 -no-pie -ggdb3")
+    set_target_properties(lx_loader PROPERTIES COMPILE_FLAGS "-no-pie")
+    set_target_properties(lx_loader PROPERTIES LINK_FLAGS "-no-pie -ggdb3")
 endif()
 
 # end of CMakeLists.txt ...
